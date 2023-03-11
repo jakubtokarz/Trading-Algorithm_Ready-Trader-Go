@@ -88,7 +88,7 @@ class AutoTrader(BaseAutoTrader):
         """
         self.logger.info("received order book for instrument %d with sequence number %d", instrument,
                          sequence_number)
-        vol = 10
+
         if instrument == Instrument.FUTURE:
             self.future_ask_prices = ask_prices
             self.future_bid_prices = bid_prices
@@ -102,26 +102,43 @@ class AutoTrader(BaseAutoTrader):
 
         if self.etf_ask_prices[0] > 0 and self.future_ask_prices[0] > 0:
             mid_point_price = self.etf_bid_prices[0] + ((self.etf_ask_prices[0] - self.etf_bid_prices[0]) // 2)
-            price_adjustment_window = - (self.position // vol) * TICK_SIZE_IN_CENTS
-            our_ask_price = mid_point_price + TICK_SIZE_IN_CENTS + price_adjustment_window
-            our_bid_price = mid_point_price - TICK_SIZE_IN_CENTS + price_adjustment_window
+            our_ask_price = ((mid_point_price + TICK_SIZE_IN_CENTS - self.position) // TICK_SIZE_IN_CENTS) * TICK_SIZE_IN_CENTS
+            our_bid_price = ((mid_point_price - TICK_SIZE_IN_CENTS - self.position) // TICK_SIZE_IN_CENTS) * TICK_SIZE_IN_CENTS
 
             if our_ask_price <= our_bid_price:
                 return
 
-            # our_ask_price = mid_point_price + TICK_SIZE_IN_CENTS
-            # our_bid_price = mid_point_price - TICK_SIZE_IN_CENTS
-            spread_profit = (our_ask_price - our_bid_price) * vol  # TODO: seperate vol + ask and bid
-            ask_fee = vol * our_ask_price * MAKER_FEE
-            bid_fee = vol * our_bid_price * MAKER_FEE
-            total_etf_profit = spread_profit + ask_fee + bid_fee
+            ask_fee = LOT_SIZE * our_ask_price * MAKER_FEE
+            bid_fee = LOT_SIZE * our_bid_price * MAKER_FEE
+            total_etf_ask_value = our_ask_price * LOT_SIZE + ask_fee
+            total_etf_bid_value = our_bid_price * LOT_SIZE + bid_fee
 
-            future_ask_cost_offset = self.future_ask_prices[0] - our_bid_price
-            future_bid_cost_offset = self.future_bid_prices[0] - our_ask_price
-            future_total_cost = (future_ask_cost_offset + future_bid_cost_offset) * vol
-            hedge_ask_fee = vol * self.future_ask_prices[0] * TAKER_FEE
-            hedge_bid_fee = vol * self.future_bid_prices[0] * TAKER_FEE
-            total_hedge_cost = future_total_cost + hedge_ask_fee + hedge_bid_fee
+            # future_ask_cost = self.future_ask_prices[0] * LOT_SIZE
+            future_ask_cost = 0
+            wanted_lot_size = LOT_SIZE
+            for i in range(len(self.future_ask_prices)):
+                if self.future_ask_volume[i] >= wanted_lot_size:
+                    future_ask_cost += self.future_ask_prices[i] * wanted_lot_size
+                    break
+                else:
+                    future_ask_cost += self.future_ask_prices[i] * self.future_ask_volume[i]
+                    wanted_lot_size -= self.future_ask_volume[i]
+
+            # future_bid_cost = self.future_bid_prices[0] * LOT_SIZE
+            future_bid_cost = 0
+            wanted_lot_size = LOT_SIZE
+            for i in range(len(self.future_bid_prices)):
+                if self.future_bid_volume[i] >= wanted_lot_size:
+                    future_bid_cost += self.future_bid_prices[i] * wanted_lot_size
+                    break
+                else:
+                    future_bid_cost += self.future_bid_prices[i] * self.future_bid_volume[i]
+                    wanted_lot_size -= self.future_bid_volume[i]
+
+            hedge_ask_fee = future_ask_cost * TAKER_FEE
+            hedge_bid_fee = future_bid_cost * TAKER_FEE
+            total_future_ask_cost = future_ask_cost# + hedge_ask_fee
+            total_future_bid_cost = future_bid_cost# + hedge_bid_fee
 
             if self.bid_id != 0 and our_bid_price not in (self.bid_price, 0):
                 self.send_cancel_order(self.bid_id)
@@ -130,19 +147,21 @@ class AutoTrader(BaseAutoTrader):
                 self.send_cancel_order(self.ask_id)
                 self.ask_id = 0
 
-            if total_etf_profit > total_hedge_cost and self.bid_id == 0 and our_bid_price != 0 and \
-                    self.position < POSITION_LIMIT and self.ask_id == 0 and our_ask_price != 0 and \
-                    self.position > -POSITION_LIMIT:
-
+            if total_etf_bid_value > total_future_bid_cost and self.bid_id == 0 and our_bid_price != 0 and self.position < POSITION_LIMIT:
                 self.bid_id = next(self.order_ids)
                 self.bid_price = our_bid_price
-                self.send_insert_order(self.bid_id, Side.BUY, our_bid_price, vol, Lifespan.GOOD_FOR_DAY)
+                self.send_insert_order(self.bid_id, Side.BUY, our_bid_price, LOT_SIZE, Lifespan.GOOD_FOR_DAY)
                 self.bids.add(self.bid_id)
 
+            if total_etf_ask_value > total_future_ask_cost and self.ask_id == 0 and our_ask_price != 0 and self.position > -POSITION_LIMIT:
                 self.ask_id = next(self.order_ids)
                 self.ask_price = our_ask_price
-                self.send_insert_order(self.ask_id, Side.SELL, our_ask_price, vol, Lifespan.GOOD_FOR_DAY)
+                self.send_insert_order(self.ask_id, Side.SELL, our_ask_price, LOT_SIZE, Lifespan.GOOD_FOR_DAY)
                 self.asks.add(self.ask_id)
+
+                # etf_val = vol *our_ask_price
+                # ftr_value = self.future_bid_prices[0] * vol
+                # if etf_val + etf_val*etf_fee > ftr_value + ftr_value *ftr_fee
 
     def on_order_filled_message(self, client_order_id: int, price: int, volume: int) -> None:
         """Called when one of your orders is filled, partially or fully.
