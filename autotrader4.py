@@ -23,7 +23,7 @@ from typing import List
 from ready_trader_go import BaseAutoTrader, Instrument, Lifespan, MAXIMUM_ASK, MINIMUM_BID, Side
 
 
-LOT_SIZE = 50
+LOT_SIZE = 10
 POSITION_LIMIT = 100
 TICK_SIZE_IN_CENTS = 100
 MIN_BID_NEAREST_TICK = (MINIMUM_BID + TICK_SIZE_IN_CENTS) // TICK_SIZE_IN_CENTS * TICK_SIZE_IN_CENTS
@@ -54,12 +54,6 @@ class AutoTrader(BaseAutoTrader):
         self.bid_prices: List[int] = []
         self.ask_volumes: List[int] = []
         self.bid_volumes: List[int] = []
-        
-        self.future_ask_prices: List[int] = []
-        self.future_bid_prices: List[int] = []
-        self.future_ask_volumes: List[int] = []
-        self.future_bid_volumes: List[int] = []
-        
 
     def on_error_message(self, client_order_id: int, error_message: bytes) -> None:
         """Called when the exchange detects an error.
@@ -96,75 +90,47 @@ class AutoTrader(BaseAutoTrader):
             self.ask_volumes = ask_volumes
             self.bid_prices = bid_prices  
             self.bid_volumes = bid_volumes
-            
-        if instrument == Instrument.FUTURE:
-            self.future_ask_prices = ask_prices  
-            self.future_ask_volumes = ask_volumes
-            self.future_bid_prices = bid_prices  
-            self.future_bid_volumes = bid_volumes
 
         if len(self.ask_prices) > 0 and len(self.bid_prices) > 0 and self.ask_prices[0] > 0 and self.bid_prices[0] > 0:
             # print("in order book update, ask prices: ", ask_prices)
             self.logger.info("received order book for instrument %d with sequence number %d", instrument,
                             sequence_number)
-            
+            # print("best prices: ", self.bid_prices[0], self.ask_prices[0])
+            # mid_price = round((self.bid_prices[0] + self.ask_prices[0])/200)*100
+            # new_bid_price = bid_prices[0] + price_adjustment if bid_prices[0] != 0 else 0
+            # new_ask_price = ask_prices[0] + price_adjustment if ask_prices[0] != 0 else 0
+            new_bid_price = bid_prices[0] - TICK_SIZE_IN_CENTS
+            new_ask_price = ask_prices[0] + TICK_SIZE_IN_CENTS
+            # new_bid_price = ask_prices[0] + 300
+            # new_ask_price = bid_prices[0] - 300
+            print("trying", new_ask_price, new_bid_price)
+            if (new_ask_price <= new_bid_price):
+                return
+            # print("mid is ", mid_price)
+            print("!!!!!!!!!!", new_bid_price, new_ask_price)
+            print("compare to", self.bid_prices[0], self.ask_prices[0])
             if self.asks_left == 0 and self.bids_left == 0:
-                # profitable bid
-                if self.future_ask_prices[0] > self.bid_prices[0] and self.position < POSITION_LIMIT:
-                    new_bid_price = (self.bid_prices[0] - self.position) // TICK_SIZE_IN_CENTS * TICK_SIZE_IN_CENTS
+                if self.bid_id == 0 and new_bid_price != 0 and self.position < POSITION_LIMIT:
                     self.bid_id = next(self.order_ids)
-                    self.bid_price = new_bid_price 
-                    print("DOING A")
+                    self.bid_price = new_bid_price
                     self.send_insert_order(self.bid_id, Side.BUY, new_bid_price, LOT_SIZE, Lifespan.GOOD_FOR_DAY)
                     self.bids.add(self.bid_id)
-                    self.bids_left+= LOT_SIZE
-                    
-                # profitable ask
-                if self.future_bid_prices[0] < self.ask_prices[0] and self.position > -POSITION_LIMIT:
-                    new_ask_price = (self.ask_prices[0] - self.position) // TICK_SIZE_IN_CENTS * TICK_SIZE_IN_CENTS
+                    self.bids_left += LOT_SIZE
+
+                if self.ask_id == 0 and new_ask_price != 0 and self.position > -POSITION_LIMIT:
                     self.ask_id = next(self.order_ids)
                     self.ask_price = new_ask_price
-                    print("DOING B")
                     self.send_insert_order(self.ask_id, Side.SELL, new_ask_price, LOT_SIZE, Lifespan.GOOD_FOR_DAY)
                     self.asks.add(self.ask_id)
                     self.asks_left += LOT_SIZE
-            
-            # # print("best prices: ", self.bid_prices[0], self.ask_prices[0])
-            # # mid_price = round((self.bid_prices[0] + self.ask_prices[0])/200)*100
-            # # new_bid_price = bid_prices[0] + price_adjustment if bid_prices[0] != 0 else 0
-            # # new_ask_price = ask_prices[0] + price_adjustment if ask_prices[0] != 0 else 0
-            # new_bid_price = bid_prices[0] - TICK_SIZE_IN_CENTS
-            # new_ask_price = ask_prices[0] + TICK_SIZE_IN_CENTS
-            # # new_bid_price = ask_prices[0] + 300
-            # # new_ask_price = bid_prices[0] - 300
-            # print("trying", new_ask_price, new_bid_price)
-            # if (new_ask_price <= new_bid_price):
-                # return
-            # # print("mid is ", mid_price)
-            # print("!!!!!!!!!!", new_bid_price, new_ask_price)
-            # print("compare to", self.bid_prices[0], self.ask_prices[0])
-            # if self.asks_left == 0 and self.bids_left == 0:
-                # if self.bid_id == 0 and new_bid_price != 0 and self.position < POSITION_LIMIT:
-                #     self.bid_id = next(self.order_ids)
-                #     self.bid_price = new_bid_price
-                #     self.send_insert_order(self.bid_id, Side.BUY, new_bid_price, LOT_SIZE, Lifespan.GOOD_FOR_DAY)
-                #     self.bids.add(self.bid_id)
-                #     self.bids_left+= LOT_SIZE
-
-                # if self.ask_id == 0 and new_ask_price != 0 and self.position > -POSITION_LIMIT:
-                #     self.ask_id = next(self.order_ids)
-                #     self.ask_price = new_ask_price
-                #     self.send_insert_order(self.ask_id, Side.SELL, new_ask_price, LOT_SIZE, Lifespan.GOOD_FOR_DAY)
-                #     self.asks.add(self.ask_id)
-                #     self.asks_left += LOT_SIZE
                     
-            # print("have left:", self.asks_left, self.bids_left)
+            print("have left:", self.asks_left, self.bids_left)
             if self.asks_left > 0 and self.bids_left == 0:
-                # print("    cancelling bid")
+                print("    cancelling bid")
                 self.send_cancel_order(self.ask_id)
                 self.asks_left = 0
             if self.bids_left > 0 and self.asks_left == 0:
-                # print("    cancelling bid")
+                print("    cancelling bid")
                 self.send_cancel_order(self.bid_id)
                 self.bids_left = 0
 
