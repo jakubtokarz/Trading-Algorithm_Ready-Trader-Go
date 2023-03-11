@@ -47,6 +47,13 @@ class AutoTrader(BaseAutoTrader):
         self.bids = set()
         self.asks = set()
         self.ask_id = self.ask_price = self.bid_id = self.bid_price = self.position = 0
+        self.bids_left = 0
+        self.asks_left = 0
+
+        self.ask_prices: List[int] = []
+        self.bid_prices: List[int] = []
+        self.ask_volumes: List[int] = []
+        self.bid_volumes: List[int] = []
 
     def on_error_message(self, client_order_id: int, error_message: bytes) -> None:
         """Called when the exchange detects an error.
@@ -77,31 +84,55 @@ class AutoTrader(BaseAutoTrader):
         prices are reported along with the volume available at each of those
         price levels.
         """
-        self.logger.info("received order book for instrument %d with sequence number %d", instrument,
-                         sequence_number)
-        if instrument == Instrument.FUTURE:
-            price_adjustment = - (self.position // LOT_SIZE) * TICK_SIZE_IN_CENTS
-            new_bid_price = bid_prices[0] + price_adjustment if bid_prices[0] != 0 else 0
-            new_ask_price = ask_prices[0] + price_adjustment if ask_prices[0] != 0 else 0
+        print("order book update!!")
+        if instrument == Instrument.ETF:
+            self.ask_prices = ask_prices  
+            self.ask_volumes = ask_volumes
+            self.bid_prices = bid_prices  
+            self.bid_volumes = bid_volumes
 
-            if self.bid_id != 0 and new_bid_price not in (self.bid_price, 0):
-                self.send_cancel_order(self.bid_id)
-                self.bid_id = 0
-            if self.ask_id != 0 and new_ask_price not in (self.ask_price, 0):
+        if len(self.ask_prices) > 0 and len(self.bid_prices) > 0 and self.ask_prices[0] > 0 and self.bid_prices[0] > 0:
+            # print("in order book update, ask prices: ", ask_prices)
+            self.logger.info("received order book for instrument %d with sequence number %d", instrument,
+                            sequence_number)
+            # print("best prices: ", self.bid_prices[0], self.ask_prices[0])
+            # mid_price = round((self.bid_prices[0] + self.ask_prices[0])/200)*100
+            # new_bid_price = bid_prices[0] + price_adjustment if bid_prices[0] != 0 else 0
+            # new_ask_price = ask_prices[0] + price_adjustment if ask_prices[0] != 0 else 0
+            new_bid_price = bid_prices[0] - TICK_SIZE_IN_CENTS
+            new_ask_price = ask_prices[0] + TICK_SIZE_IN_CENTS
+            # new_bid_price = ask_prices[0] + 300
+            # new_ask_price = bid_prices[0] - 300
+            print("trying", new_ask_price, new_bid_price)
+            if (new_ask_price <= new_bid_price):
+                return
+            # print("mid is ", mid_price)
+            print("!!!!!!!!!!", new_bid_price, new_ask_price)
+            print("compare to", self.bid_prices[0], self.ask_prices[0])
+            if self.asks_left == 0 and self.bids_left == 0:
+                if self.bid_id == 0 and new_bid_price != 0 and self.position < POSITION_LIMIT:
+                    self.bid_id = next(self.order_ids)
+                    self.bid_price = new_bid_price
+                    self.send_insert_order(self.bid_id, Side.BUY, new_bid_price, LOT_SIZE, Lifespan.GOOD_FOR_DAY)
+                    self.bids.add(self.bid_id)
+                    self.bids_left += LOT_SIZE
+
+                if self.ask_id == 0 and new_ask_price != 0 and self.position > -POSITION_LIMIT:
+                    self.ask_id = next(self.order_ids)
+                    self.ask_price = new_ask_price
+                    self.send_insert_order(self.ask_id, Side.SELL, new_ask_price, LOT_SIZE, Lifespan.GOOD_FOR_DAY)
+                    self.asks.add(self.ask_id)
+                    self.asks_left += LOT_SIZE
+                    
+            print("have left:", self.asks_left, self.bids_left)
+            if self.asks_left > 0 and self.bids_left == 0:
+                print("    cancelling bid")
                 self.send_cancel_order(self.ask_id)
-                self.ask_id = 0
-
-            if self.bid_id == 0 and new_bid_price != 0 and self.position < POSITION_LIMIT:
-                self.bid_id = next(self.order_ids)
-                self.bid_price = new_bid_price
-                self.send_insert_order(self.bid_id, Side.BUY, new_bid_price, LOT_SIZE, Lifespan.GOOD_FOR_DAY)
-                self.bids.add(self.bid_id)
-
-            if self.ask_id == 0 and new_ask_price != 0 and self.position > -POSITION_LIMIT:
-                self.ask_id = next(self.order_ids)
-                self.ask_price = new_ask_price
-                self.send_insert_order(self.ask_id, Side.SELL, new_ask_price, LOT_SIZE, Lifespan.GOOD_FOR_DAY)
-                self.asks.add(self.ask_id)
+                self.asks_left = 0
+            if self.bids_left > 0 and self.asks_left == 0:
+                print("    cancelling bid")
+                self.send_cancel_order(self.bid_id)
+                self.bids_left = 0
 
     def on_order_filled_message(self, client_order_id: int, price: int, volume: int) -> None:
         """Called when one of your orders is filled, partially or fully.
@@ -110,13 +141,18 @@ class AutoTrader(BaseAutoTrader):
         which may be better than the order's limit price. The volume is
         the number of lots filled at that price.
         """
+
         self.logger.info("received order filled for order %d with price %d and volume %d", client_order_id,
                          price, volume)
         if client_order_id in self.bids:
             self.position += volume
+            self.bids_left -= volume
+            print("hedge ask for {}".format(MIN_BID_NEAREST_TICK))
             self.send_hedge_order(next(self.order_ids), Side.ASK, MIN_BID_NEAREST_TICK, volume)
         elif client_order_id in self.asks:
             self.position -= volume
+            self.asks_left -= volume
+            print("hedge bid for {}".format(MAX_ASK_NEAREST_TICK))
             self.send_hedge_order(next(self.order_ids), Side.BID, MAX_ASK_NEAREST_TICK, volume)
 
     def on_order_status_message(self, client_order_id: int, fill_volume: int, remaining_volume: int,
@@ -153,5 +189,6 @@ class AutoTrader(BaseAutoTrader):
         If there are less than five prices on a side, then zeros will appear at
         the end of both the prices and volumes arrays.
         """
+
         self.logger.info("received trade ticks for instrument %d with sequence number %d", instrument,
                          sequence_number)
