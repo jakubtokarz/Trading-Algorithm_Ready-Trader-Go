@@ -101,11 +101,16 @@ class AutoTrader(BaseAutoTrader):
             self.etf_bid_volume = bid_volumes
 
         if self.etf_ask_prices[0] > 0 and self.future_ask_prices[0] > 0:
-            mid_point_price = self.etf_ask_prices[0] + ((self.etf_ask_prices[0] - self.etf_bid_prices[0]) // 2)
-            # our_ask_price = self.etf_ask_prices[0] - 100
-            # our_bid_price = self.etf_bid_prices[0] + 100
-            our_ask_price = mid_point_price + 1000
-            our_bid_price = mid_point_price - 1000
+            mid_point_price = self.etf_bid_prices[0] + ((self.etf_ask_prices[0] - self.etf_bid_prices[0]) // 2)
+            price_adjustment_window = - (self.position // vol) * TICK_SIZE_IN_CENTS
+            our_ask_price = mid_point_price + TICK_SIZE_IN_CENTS + price_adjustment_window
+            our_bid_price = mid_point_price - TICK_SIZE_IN_CENTS + price_adjustment_window
+
+            if our_ask_price <= our_bid_price:
+                return
+
+            # our_ask_price = mid_point_price + TICK_SIZE_IN_CENTS
+            # our_bid_price = mid_point_price - TICK_SIZE_IN_CENTS
             spread_profit = (our_ask_price - our_bid_price) * vol  # TODO: seperate vol + ask and bid
             ask_fee = vol * our_ask_price * MAKER_FEE
             bid_fee = vol * our_bid_price * MAKER_FEE
