@@ -1,0 +1,4 @@
+- wow, realize you just profit off of providing a price in the ETF which:
+    - provides liquidity (bid below asks, / ask above bids)
+    - is a lower/higher bid/ask than the "true" future price (since if we then hedge for that future price that means we made free 
+      money)

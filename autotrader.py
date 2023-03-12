@@ -23,7 +23,7 @@ from typing import List
 from ready_trader_go import BaseAutoTrader, Instrument, Lifespan, MAXIMUM_ASK, MINIMUM_BID, Side
 
 
-LOT_SIZE = 50
+LOT_SIZE = 10
 POSITION_LIMIT = 100
 TICK_SIZE_IN_CENTS = 100
 MIN_BID_NEAREST_TICK = (MINIMUM_BID + TICK_SIZE_IN_CENTS) // TICK_SIZE_IN_CENTS * TICK_SIZE_IN_CENTS
@@ -112,14 +112,14 @@ class AutoTrader(BaseAutoTrader):
                 self.ask_id = 0
 
             # ETF is cheaper, we are willing to buy it
-            if self.bid_id == 0 and self.position + LOT_SIZE <= POSITION_LIMIT and mid_etf_price < mid_future_price:
+            if self.bid_id == 0 and self.position + 2*LOT_SIZE <= POSITION_LIMIT and mid_etf_price < mid_future_price:
                 self.bid_id = next(self.order_ids)
                 self.bid_price = self.bid_prices[0]
                 # self.bid_price = self.future_bid_prices[0] + price_adjustment
                 self.send_insert_order(self.bid_id, Side.BUY, self.bid_price, LOT_SIZE, Lifespan.GOOD_FOR_DAY)
                 self.bids.add(self.bid_id)
 
-            if self.ask_id == 0 and self.position - LOT_SIZE >= -POSITION_LIMIT and mid_etf_price > mid_future_price:
+            if self.ask_id == 0 and self.position - 2*LOT_SIZE >= -POSITION_LIMIT and mid_etf_price > mid_future_price:
                 self.ask_id = next(self.order_ids)
                 self.ask_price = self.ask_prices[0]
                 # self.ask_price = self.future_ask_prices[0] + price_adjustment
