@@ -23,7 +23,8 @@ from typing import List
 from ready_trader_go import BaseAutoTrader, Instrument, Lifespan, MAXIMUM_ASK, MINIMUM_BID, Side
 
 
-LOT_SIZE = 50
+LOT_SIZE = 10
+LOT_SIZE2 = 50
 POSITION_LIMIT = 100
 TICK_SIZE_IN_CENTS = 100
 MIN_BID_NEAREST_TICK = (MINIMUM_BID + TICK_SIZE_IN_CENTS) // TICK_SIZE_IN_CENTS * TICK_SIZE_IN_CENTS
@@ -136,21 +137,21 @@ class AutoTrader(BaseAutoTrader):
                     self.asks_left += LOT_SIZE
                     
             if self.asks_left2 == 0 and self.bids_left2 == 0:
-                if self.position + LOT_SIZE <= POSITION_LIMIT:
+                if self.position + LOT_SIZE2 <= POSITION_LIMIT:
                     new_bid_price = bid_prices[0] - TICK_SIZE_IN_CENTS
                     self.bid_id2 = next(self.order_ids)
                     print("C")
-                    self.send_insert_order(self.bid_id2, Side.BUY, new_bid_price, LOT_SIZE, Lifespan.GOOD_FOR_DAY)
+                    self.send_insert_order(self.bid_id2, Side.BUY, new_bid_price, LOT_SIZE2, Lifespan.GOOD_FOR_DAY)
                     self.bids2.add(self.bid_id2)
-                    self.bids_left2 += LOT_SIZE
+                    self.bids_left2 += LOT_SIZE2
                 
-                if self.position - LOT_SIZE >= -POSITION_LIMIT:
+                if self.position - LOT_SIZE2 >= -POSITION_LIMIT:
                     new_ask_price = ask_prices[0] + TICK_SIZE_IN_CENTS
                     self.ask_id2 = next(self.order_ids)
                     print("D")
-                    self.send_insert_order(self.ask_id2, Side.SELL, new_ask_price, LOT_SIZE, Lifespan.GOOD_FOR_DAY)
+                    self.send_insert_order(self.ask_id2, Side.SELL, new_ask_price, LOT_SIZE2, Lifespan.GOOD_FOR_DAY)
                     self.asks2.add(self.ask_id2)
-                    self.asks_left2 += LOT_SIZE
+                    self.asks_left2 += LOT_SIZE2
                     
             if self.asks_left > 0 and self.bids_left == 0:
                 self.send_cancel_order(self.ask_id)
