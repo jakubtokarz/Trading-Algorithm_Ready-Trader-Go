@@ -1,6 +1,6 @@
 {
   "Engine": {
-    "MarketDataFile": "data/market_data4.csv",
+    "MarketDataFile": "data/market_data2.csv",
     "MarketEventInterval": 0.05,
     "MarketOpenDelay": 5.0,
     "MatchEventsFile": "match_events.csv",
@@ -40,6 +40,7 @@
     "TraderTwo": "secret2",
     "TraderThree": "secret3",
     "TraderFour": "secret4",
-    "TraderFive": "secret5"
+    "TraderFive": "secret5",
+    "TraderSix": "secret6"
   }
 }
