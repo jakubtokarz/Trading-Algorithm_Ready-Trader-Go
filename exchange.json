@@ -37,11 +37,11 @@
   },
   "Traders": {
     "TraderOne": "secret1",
-    "TraderTwo": "secret2",
-    "TraderThree": "secret3",
-    "TraderFour": "secret4",
-    "TraderFive": "secret5",
-    "TraderSix": "secret6",
-    "TraderSeven": "secret7"
+    "estimate_before_attempting": "estimate_before_attempting",
+    "fill_spread": "fill_spread",
+    "first_working": "first_working",
+    "first_working_bigger_lot_size": "first_working_bigger_lot_size",
+    "initial_trader": "initial_trader",
+    "up_the_market": "up_the_market"
   }
 }

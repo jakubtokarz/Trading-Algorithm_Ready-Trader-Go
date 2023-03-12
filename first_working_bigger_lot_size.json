@@ -7,6 +7,6 @@
     "Type": "mmap",
     "Name": "info.dat"
   },
-  "TeamName": "TraderTwo",
-  "Secret": "secret2"
+  "TeamName": "first_working_bigger_lot_size",
+  "Secret": "first_working_bigger_lot_size"
 }

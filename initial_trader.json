@@ -7,6 +7,6 @@
     "Type": "mmap",
     "Name": "info.dat"
   },
-  "TeamName": "TraderSix",
-  "Secret": "secret6"
+  "TeamName": "initial_trader",
+  "Secret": "initial_trader"
 }

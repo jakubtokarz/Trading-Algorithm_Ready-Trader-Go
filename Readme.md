@@ -41,7 +41,7 @@ python3 rtg.py run [AUTOTRADER FILENAME [AUTOTRADER FILENAME]]
 For example:
 
 ```shell
-python3 rtg.py run autotrader.py
+python3 rtg.py run first_working.py
 ```
 
 Each autotrader must have a corresponding JSON configuration file as described below.
@@ -227,7 +227,7 @@ To submit your autotrader, you need to _commit_ your `autotrader.py` file to the
 GIT repository and then _push_ that commit to your Git repository. For example:
 
 ```shell
-git add autotrader.py
+git add first_working.py
 git commit -m "Updating my autotrader"
 git push
 ```

@@ -7,6 +7,6 @@
     "Type": "mmap",
     "Name": "info.dat"
   },
-  "TeamName": "TraderFour",
-  "Secret": "secret4"
+  "TeamName": "fill_spread",
+  "Secret": "fill_spread"
 }
