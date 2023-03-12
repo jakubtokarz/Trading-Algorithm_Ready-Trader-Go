@@ -23,7 +23,7 @@ from typing import List
 from ready_trader_go import BaseAutoTrader, Instrument, Lifespan, MAXIMUM_ASK, MINIMUM_BID, Side
 
 ORDER_LIMIT = 10
-LOT_SIZE = 10
+LOT_SIZE = 50
 POSITION_LIMIT = 100
 TICK_SIZE_IN_CENTS = 100
 MIN_BID_NEAREST_TICK = (MINIMUM_BID + TICK_SIZE_IN_CENTS) // TICK_SIZE_IN_CENTS * TICK_SIZE_IN_CENTS
@@ -55,6 +55,7 @@ class AutoTrader(BaseAutoTrader):
         self.future_ask_volumes = 0
         self.future_bid_prices = 0
         self.future_bid_volumes = 0
+        self.order_count = 0
 
     def on_error_message(self, client_order_id: int, error_message: bytes) -> None:
         """Called when the exchange detects an error.
@@ -105,56 +106,70 @@ class AutoTrader(BaseAutoTrader):
             mid_future_price = round((self.future_ask_prices[0] + self.future_bid_prices[0])/(2*TICK_SIZE_IN_CENTS))*TICK_SIZE_IN_CENTS
             mid_etf_price = round((self.ask_prices[0] + self.bid_prices[0])/(2*TICK_SIZE_IN_CENTS))*TICK_SIZE_IN_CENTS
             
-            print("orders active: ", self.bids, self.asks)
-            print(self.bid_id)
+            # print("orders active: ", self.bids, self.asks)
 
-            if self.bid_id != 0:
-                for order in self.bids:
-                    self.send_cancel_order(order)
-                self.bid_id = 0
-            if self.ask_id != 0:
-                for order in self.asks:
-                    self.send_cancel_order(order)
-                self.ask_id = 0
+            for order in self.bids:
+                self.send_cancel_order(order)
+            for order in self.asks:
+                self.send_cancel_order(order)
                 
-            # ETF is cheaper, we are willing to buy it
-            if self.bid_id == 0 and mid_etf_price < self.future_bid_prices[0]:
-                our_bid_price = self.bid_prices[0]
-                # print(len(self.bids)*LOT_SIZE + self.position + LOT_SIZE <= POSITION_LIMIT)
-                # print(our_bid_price < self.future_bid_prices[0])
-                # print()
-                while (len(self.bids)*LOT_SIZE + self.position + LOT_SIZE <= POSITION_LIMIT 
-                    # and our_bid_price < min(self.future_bid_prices[0], self.ask_prices[0])
-                    and our_bid_price < self.future_bid_prices[0]
-                    and len(self.bids) + len(self.asks) < ORDER_LIMIT):
-                    print("trading!!", len(self.bids) + len(self.asks))
-                    self.bid_id = next(self.order_ids)
-                    self.bid_price = our_bid_price + price_adjustment
-                    self.send_insert_order(self.bid_id, Side.BUY, self.bid_price, LOT_SIZE, Lifespan.GOOD_FOR_DAY)
-                    self.bids.add(self.bid_id)
-                    our_bid_price += TICK_SIZE_IN_CENTS
-                    self.logger.info("now have %d bid orders active: %s, total %d", len(self.bids), self.bids, len(self.bids) + len(self.asks))
-                    
-            if self.ask_id == 0 and mid_etf_price > self.future_ask_prices[0]:
-                our_ask_price = self.ask_prices[0]
-                while (-len(self.asks)*LOT_SIZE + self.position - LOT_SIZE >= -POSITION_LIMIT 
-                    # and our_ask_price > max(self.future_ask_prices[0], self.bid_prices[0])
-                    and our_ask_price > self.future_ask_prices[0]
-                    and len(self.bids) + len(self.asks) < ORDER_LIMIT):
-                    print("trading!!", len(self.bids) + len(self.asks))
-                    self.ask_id = next(self.order_ids)
-                    self.ask_price = our_ask_price + price_adjustment
-                    self.send_insert_order(self.ask_id, Side.SELL, self.ask_price, LOT_SIZE, Lifespan.GOOD_FOR_DAY)
-                    self.asks.add(self.ask_id)
-                    our_ask_price -= TICK_SIZE_IN_CENTS
-                    self.logger.info("now have %d ask orders active: %s, total %d", len(self.asks), self.asks, len(self.bids) + len(self.asks))
-                    
-            # if self.ask_id == 0 and self.position - 2*LOT_SIZE >= -POSITION_LIMIT and mid_etf_price > mid_future_price:
-            #     self.ask_id = next(self.order_ids)
-            #     self.ask_price = self.bid_prices[0] + TICK_SIZE_IN_CENTS
-            #     # self.ask_price = self.future_ask_prices[0] + price_adjustment
-            #     self.send_insert_order(self.ask_id, Side.SELL, self.ask_price, LOT_SIZE, Lifespan.GOOD_FOR_DAY)
-            #     self.asks.add(self.ask_id)
+            # choose most competitive bid price at which we make a profit
+            current_bid_price = self.future_ask_prices[0]
+            while current_bid_price >= self.bid_prices[0]:
+                multiplier = 0.98 if current_bid_price >= self.ask_prices[0] else 1.01
+                if (current_bid_price*multiplier < self.future_bid_prices[0]):
+                    break
+                current_bid_price -= TICK_SIZE_IN_CENTS
+            
+            # choose most competitive ask price at which we make a profit
+            current_ask_price = self.future_bid_prices[0]
+            while current_ask_price <= self.ask_prices[0]:
+                multiplier = 0.98 if current_ask_price <= self.bid_prices[0] else 1.01
+                if (current_ask_price*multiplier > self.future_ask_prices[0]):
+                    break
+                current_ask_price += TICK_SIZE_IN_CENTS
+
+            # c = 0
+            # if current_bid_price > current_ask_price:
+            #     mid = (current_bid_price - current_ask_price)//2
+            #     if mid % TICK_SIZE_IN_CENTS == 0:
+            #         current_bid_price = 
+            #         current_ask_price
+            #     else:
+            #         current_bid_price = 
+            #         current_ask_price
+                
+            c = 0
+            while current_bid_price > current_ask_price:
+                print("C")
+                if c%2 == 0:
+                    current_bid_price -= TICK_SIZE_IN_CENTS
+                else:
+                    current_ask_price += TICK_SIZE_IN_CENTS 
+                c += 1
+            
+            SPREAD = 8
+            c = 0
+            while current_ask_price - current_bid_price < SPREAD * TICK_SIZE_IN_CENTS:
+                if c%2 == 0:
+                    current_bid_price -= TICK_SIZE_IN_CENTS
+                else:
+                    current_ask_price += TICK_SIZE_IN_CENTS
+                c += 1
+
+            if len(self.bids)*LOT_SIZE + self.position + LOT_SIZE <= POSITION_LIMIT:
+                print("making bid at", current_bid_price)
+                self.bid_id = next(self.order_ids)
+                self.send_insert_order(self.bid_id, Side.BUY, current_bid_price, LOT_SIZE, Lifespan.GOOD_FOR_DAY)
+                self.bids.add(self.bid_id)
+
+            if -len(self.asks)*LOT_SIZE + self.position - LOT_SIZE >= -POSITION_LIMIT:
+                print("making ask at", current_ask_price)
+                self.ask_id = next(self.order_ids)
+                self.send_insert_order(self.ask_id, Side.SELL, current_ask_price, LOT_SIZE, Lifespan.GOOD_FOR_DAY)
+                self.asks.add(self.ask_id)
+            
+            print()
 
     def on_order_filled_message(self, client_order_id: int, price: int, volume: int) -> None:
         """Called when one of your orders is filled, partially or fully.
@@ -191,6 +206,7 @@ class AutoTrader(BaseAutoTrader):
             elif client_order_id == self.ask_id:
                 self.ask_id = 0
 
+            self.order_count -= 1
             # It could be either a bid or an ask
             self.bids.discard(client_order_id)
             self.asks.discard(client_order_id)
