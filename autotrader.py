@@ -26,7 +26,7 @@ import numpy as np
 
 POSITION_LIMIT = 100  # per position
 
-LOT_SIZE = 10
+LOT_SIZE = 25
 TICK_SIZE_IN_CENTS = 100
 MIN_BID_NEAREST_TICK = (MINIMUM_BID + TICK_SIZE_IN_CENTS) // TICK_SIZE_IN_CENTS * TICK_SIZE_IN_CENTS
 MAX_ASK_NEAREST_TICK = MAXIMUM_ASK // TICK_SIZE_IN_CENTS * TICK_SIZE_IN_CENTS
@@ -55,8 +55,8 @@ class AutoTrader(BaseAutoTrader):
         self.bids_active = 0
         self.asks_active = 0
 
-        self.rho = 1
-        self.std_ratio = 0.01
+        self.rho = 0.8
+        self.std_ratio = 5
 
         self.past_midpoints_etf = []
         self.past_midpoints_future = []
@@ -109,24 +109,7 @@ class AutoTrader(BaseAutoTrader):
         self.logger.info("received order book for instrument %d with sequence number %d", instrument,
                          sequence_number)
 
-        if instrument == Instrument.FUTURE:
-            self.past_future_ask_prices.append(ask_prices)
-            self.past_future_bid_prices.append(bid_prices)
-            midpoint = (ask_prices[0] + bid_prices[0]) // 2
-            self.past_midpoints_future.append(midpoint)
-
-            self.avg_ask_future = (1 - self.rho) * self.avg_ask_future + self.rho * ask_prices[0]
-            self.avg_bid_future = (1 - self.rho) * self.avg_bid_future + self.rho * bid_prices[0]
-
-        if instrument == Instrument.ETF:
-            self.past_etf_ask_prices.append(ask_prices)
-            self.past_etf_bid_prices.append(bid_prices)
-            midpoint = (ask_prices[0] + bid_prices[0]) // 2
-            self.past_midpoints_etf.append(midpoint)
-
-            self.avg_ask_etf = (1 - self.rho) * self.avg_ask_etf + self.rho * ask_prices[0]
-            self.avg_bid_etf = (1 - self.rho) * self.avg_bid_etf + self.rho * bid_prices[0]
-            self.avg_midpoint_etf = (1 - self.rho) * self.avg_midpoint_etf + self.rho * midpoint
+        self.cache_changes(ask_prices, bid_prices, instrument)
 
         if self.avg_ask_etf > 0 and self.avg_ask_future > 0:
 
@@ -138,12 +121,12 @@ class AutoTrader(BaseAutoTrader):
             print(etf_midpoint_std)
             new_ask_price = 0
             new_bid_price = 0
-            if self.avg_ask_etf < self.avg_bid_future:
-                new_bid_price = (
-                                            self.avg_midpoint_etf - self.std_ratio * etf_midpoint_std + TICK_SIZE_IN_CENTS) // TICK_SIZE_IN_CENTS * TICK_SIZE_IN_CENTS
-            if self.avg_bid_etf > self.avg_ask_future:
-                new_ask_price = (
-                                            self.avg_midpoint_etf + self.std_ratio * etf_midpoint_std + TICK_SIZE_IN_CENTS) // TICK_SIZE_IN_CENTS * TICK_SIZE_IN_CENTS
+            spread = self.avg_ask_etf - self.avg_bid_etf
+            if self.avg_ask_etf < self.avg_bid_future and spread > 0:
+
+                new_bid_price = (self.avg_midpoint_etf - 0.2 * spread/2) // TICK_SIZE_IN_CENTS * TICK_SIZE_IN_CENTS
+            if self.avg_bid_etf > self.avg_ask_future and spread > 0:
+                new_ask_price = (self.avg_midpoint_etf + 0.2 * spread/2) // TICK_SIZE_IN_CENTS * TICK_SIZE_IN_CENTS
 
             # if new_ask_price <= new_bid_price:
             #     return
@@ -155,19 +138,38 @@ class AutoTrader(BaseAutoTrader):
                 self.send_cancel_order(self.ask_id)
                 self.ask_id = 0
 
-            if self.bid_id == 0 and new_bid_price != 0 and self.position < POSITION_LIMIT:
+            if len(self.bids) == 0 and self.bid_id == 0 and new_bid_price != 0 and self.position + 2 * LOT_SIZE < POSITION_LIMIT:
                 self.bid_id = next(self.order_ids)
                 self.bid_price = new_bid_price
                 print(new_bid_price)
                 self.send_insert_order(self.bid_id, Side.BUY, int(new_bid_price), LOT_SIZE, Lifespan.GOOD_FOR_DAY)
                 self.bids.add(self.bid_id)
 
-            if self.ask_id == 0 and new_ask_price != 0 and self.position > -POSITION_LIMIT:
+            if len(self.asks) == 0 and self.ask_id == 0 and new_ask_price != 0 and self.position - 2 * LOT_SIZE > -POSITION_LIMIT:
                 self.ask_id = next(self.order_ids)
                 self.ask_price = new_ask_price
                 print(new_ask_price)
                 self.send_insert_order(self.ask_id, Side.SELL, int(new_ask_price), LOT_SIZE, Lifespan.GOOD_FOR_DAY)
                 self.asks.add(self.ask_id)
+
+    def cache_changes(self, ask_prices, bid_prices, instrument):
+        if instrument == Instrument.FUTURE:
+            self.past_future_ask_prices.append(ask_prices)
+            self.past_future_bid_prices.append(bid_prices)
+            midpoint = (ask_prices[0] + bid_prices[0]) // 2
+            self.past_midpoints_future.append(midpoint)
+
+            self.avg_ask_future = (1 - self.rho) * self.avg_ask_future + self.rho * ask_prices[0]
+            self.avg_bid_future = (1 - self.rho) * self.avg_bid_future + self.rho * bid_prices[0]
+        if instrument == Instrument.ETF:
+            self.past_etf_ask_prices.append(ask_prices)
+            self.past_etf_bid_prices.append(bid_prices)
+            midpoint = (ask_prices[0] + bid_prices[0]) // 2
+            self.past_midpoints_etf.append(midpoint)
+
+            self.avg_ask_etf = (1 - self.rho) * self.avg_ask_etf + self.rho * ask_prices[0]
+            self.avg_bid_etf = (1 - self.rho) * self.avg_bid_etf + self.rho * bid_prices[0]
+            self.avg_midpoint_etf = (1 - self.rho) * self.avg_midpoint_etf + self.rho * midpoint
 
     def on_order_filled_message(self, client_order_id: int, price: int, volume: int) -> None:
         """Called when one of your orders is filled, partially or fully.
