@@ -22,7 +22,6 @@ from typing import List
 
 from ready_trader_go import BaseAutoTrader, Instrument, Lifespan, MAXIMUM_ASK, MINIMUM_BID, Side
 
-
 LOT_SIZE = 10
 POSITION_LIMIT = 100
 TICK_SIZE_IN_CENTS = 100
@@ -47,14 +46,9 @@ class AutoTrader(BaseAutoTrader):
         self.bids = set()
         self.asks = set()
         self.ask_id = self.ask_price = self.bid_id = self.bid_price = self.position = 0
-        self.ask_prices = []
-        self.ask_volumes = []
-        self.bid_prices = []
-        self.bid_volumes = []
-        self.future_ask_prices = 0
-        self.future_ask_volumes = 0
-        self.future_bid_prices = 0
-        self.future_bid_volumes = 0
+
+        self.etf_ask_prices = self.etf_ask_volumes = self.etf_bid_prices = self.etf_bid_volumes = self.future_ask_prices \
+            = self.future_ask_volumes = self.future_bid_prices = self.future_bid_volumes = (0, 0, 0, 0, 0)
 
     def on_error_message(self, client_order_id: int, error_message: bytes) -> None:
         """Called when the exchange detects an error.
@@ -85,24 +79,15 @@ class AutoTrader(BaseAutoTrader):
         prices are reported along with the volume available at each of those
         price levels.
         """
-        if instrument == Instrument.ETF:
-            self.ask_prices = ask_prices  
-            self.ask_volumes = ask_volumes
-            self.bid_prices = bid_prices  
-            self.bid_volumes = bid_volumes
-            
-        if instrument == Instrument.FUTURE:
-            self.future_ask_prices = ask_prices  
-            self.future_ask_volumes = ask_volumes
-            self.future_bid_prices = bid_prices  
-            self.future_bid_volumes = bid_volumes
-        
+
         self.logger.info("received order book for instrument %d with sequence number %d", instrument,
                          sequence_number)
-        if len(self.ask_prices) > 0 and len(self.bid_prices) > 0 and self.ask_prices[0] > 0 and self.bid_prices[0] > 0:
-            price_adjustment = - (self.position // LOT_SIZE) * TICK_SIZE_IN_CENTS
-            mid_future_price = round((self.future_ask_prices[0] + self.future_bid_prices[0])/TICK_SIZE_IN_CENTS)*2*TICK_SIZE_IN_CENTS
-            mid_etf_price = round((self.ask_prices[0] + self.bid_prices[0])/TICK_SIZE_IN_CENTS)*2*TICK_SIZE_IN_CENTS
+
+        self.cache_prices(instrument, sequence_number, ask_prices, ask_volumes, bid_prices, bid_volumes)
+
+        if self.etf_ask_prices[0] > 0 and self.etf_bid_prices[0] > 0:
+            mid_future_price = round((self.future_ask_prices[0] + self.future_bid_prices[0]) / (2 * TICK_SIZE_IN_CENTS)) * TICK_SIZE_IN_CENTS
+            mid_etf_price = round((self.etf_ask_prices[0] + self.etf_bid_prices[0]) / (2 * TICK_SIZE_IN_CENTS)) * TICK_SIZE_IN_CENTS
 
             if self.bid_id != 0:
                 self.send_cancel_order(self.bid_id)
@@ -112,19 +97,37 @@ class AutoTrader(BaseAutoTrader):
                 self.ask_id = 0
 
             # ETF is cheaper, we are willing to buy it
-            if self.bid_id == 0 and self.position + 2*LOT_SIZE <= POSITION_LIMIT and mid_etf_price < mid_future_price:
+            if self.bid_id == 0 and self.position + 2 * LOT_SIZE <= POSITION_LIMIT and mid_etf_price < mid_future_price:
                 self.bid_id = next(self.order_ids)
-                self.bid_price = self.bid_prices[0]
+                self.bid_price = self.etf_bid_prices[0]
                 # self.bid_price = self.future_bid_prices[0] + price_adjustment
                 self.send_insert_order(self.bid_id, Side.BUY, self.bid_price, LOT_SIZE, Lifespan.GOOD_FOR_DAY)
                 self.bids.add(self.bid_id)
 
-            if self.ask_id == 0 and self.position - 2*LOT_SIZE >= -POSITION_LIMIT and mid_etf_price > mid_future_price:
+            if self.ask_id == 0 and self.position - 2 * LOT_SIZE >= -POSITION_LIMIT and mid_etf_price > mid_future_price:
                 self.ask_id = next(self.order_ids)
-                self.ask_price = self.ask_prices[0]
+                self.ask_price = self.etf_ask_prices[0]
                 # self.ask_price = self.future_ask_prices[0] + price_adjustment
                 self.send_insert_order(self.ask_id, Side.SELL, self.ask_price, LOT_SIZE, Lifespan.GOOD_FOR_DAY)
                 self.asks.add(self.ask_id)
+
+    def cache_prices(self, instrument: int, sequence_number: int, ask_prices: List[int], ask_volumes: List[int],
+                     bid_prices: List[int], bid_volumes: List[int]) -> None:
+        """
+            Update the cached prices based on the instrument they refer to.
+        """
+        if instrument == Instrument.ETF:
+            self.etf_ask_prices = ask_prices
+            self.etf_ask_volumes = ask_volumes
+            self.etf_bid_prices = bid_prices
+            self.etf_bid_volumes = bid_volumes
+        elif instrument == Instrument.FUTURE:
+            self.future_ask_prices = ask_prices
+            self.future_ask_volumes = ask_volumes
+            self.future_bid_prices = bid_prices
+            self.future_bid_volumes = bid_volumes
+        else:
+            self.logger.warning("received order book with sequence number %d, for instrument %d", instrument, sequence_number)
 
     def on_order_filled_message(self, client_order_id: int, price: int, volume: int) -> None:
         """Called when one of your orders is filled, partially or fully.
