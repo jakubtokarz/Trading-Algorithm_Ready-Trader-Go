@@ -57,6 +57,7 @@ class AutoTrader(BaseAutoTrader):
 
         self.rho = 0.8
         self.std_ratio = 5
+        self.spread_factor = 0.3
 
         self.past_midpoints_etf = []
         self.past_midpoints_future = []
@@ -124,9 +125,9 @@ class AutoTrader(BaseAutoTrader):
             spread = self.avg_ask_etf - self.avg_bid_etf
             if self.avg_ask_etf < self.avg_bid_future and spread > 0:
 
-                new_bid_price = (self.avg_midpoint_etf - 0.2 * spread/2) // TICK_SIZE_IN_CENTS * TICK_SIZE_IN_CENTS
+                new_bid_price = (self.avg_midpoint_etf - self.spread_factor * spread/2) // TICK_SIZE_IN_CENTS * TICK_SIZE_IN_CENTS
             if self.avg_bid_etf > self.avg_ask_future and spread > 0:
-                new_ask_price = (self.avg_midpoint_etf + 0.2 * spread/2) // TICK_SIZE_IN_CENTS * TICK_SIZE_IN_CENTS
+                new_ask_price = (self.avg_midpoint_etf + self.spread_factor * spread/2) // TICK_SIZE_IN_CENTS * TICK_SIZE_IN_CENTS
 
             # if new_ask_price <= new_bid_price:
             #     return
