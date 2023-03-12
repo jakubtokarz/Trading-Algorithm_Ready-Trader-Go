@@ -22,9 +22,7 @@ from typing import List
 
 from ready_trader_go import BaseAutoTrader, Instrument, Lifespan, MAXIMUM_ASK, MINIMUM_BID, Side
 
-ORDER_OPERATION_REQUESTS_PER_SECOND_LIMIT = 50  # total
-ACTIVE_ORDER_COUNT_LIMIT = 10  # total
-ACTIVE_VOLUME_LIMIT = 200  # total
+import numpy as np
 POSITION_LIMIT = 100  # per position
 
 LOT_SIZE = 10
@@ -55,6 +53,14 @@ class AutoTrader(BaseAutoTrader):
         self.ask_id = self.ask_price = self.bid_id = self.bid_price = self.position = 0
         self.bids_active = 0
         self.asks_active = 0
+
+        self.moving_average = 0
+        self.rho = 0.9
+        self.std_ratio = 0.1
+
+        self.past_midpoints = []
+
+        self.start_limit = 20
 
         self.future_ask_prices = self.future_bid_prices = self.etf_ask_prices = self.etf_bid_prices = (0, 0, 0, 0, 0)
         self.future_ask_volume = self.future_bid_volume = self.etf_ask_volume = self.etf_bid_volume = (0, 0, 0, 0, 0)
@@ -90,7 +96,7 @@ class AutoTrader(BaseAutoTrader):
         """
         self.logger.info("received order book for instrument %d with sequence number %d", instrument,
                          sequence_number)
-        vol = 10
+        
         if instrument == Instrument.FUTURE:
             self.future_ask_prices = ask_prices
             self.future_bid_prices = bid_prices
@@ -102,54 +108,42 @@ class AutoTrader(BaseAutoTrader):
             self.etf_ask_volume = ask_volumes
             self.etf_bid_volume = bid_volumes
 
-        if self.etf_ask_prices[0] > 0 and self.future_ask_prices[0] > 0:
-            price_adjustment_window = - (self.position // vol) * TICK_SIZE_IN_CENTS
-            our_ask_price = self.etf_ask_prices[0] + 100
-            our_bid_price = self.etf_bid_prices[0] - 100
+            if self.etf_ask_prices[0] > 0 and self.etf_bid_prices[0] > 0:
 
-            if our_ask_price <= our_bid_price:
-                return
+                midpoint = (self.etf_ask_prices[0] + self.etf_bid_prices[0]) // 2
+                self.past_midpoints.append(midpoint)
+                self.moving_average = (1 - self.rho) * midpoint + self.rho * self.moving_average
 
-            # our_ask_price = mid_point_price + TICK_SIZE_IN_CENTS
-            # our_bid_price = mid_point_price - TICK_SIZE_IN_CENTS
-            # spread_profit = (our_ask_price - our_bid_price) * vol  # TODO: seperate vol + ask and bid
-            # ask_fee = vol * our_ask_price * MAKER_FEE
-            # bid_fee = vol * our_bid_price * MAKER_FEE
-            # total_etf_profit = spread_profit + ask_fee + bid_fee
+                if len(self.past_midpoints) <= self.start_limit:
+                    return
 
-            # future_ask_cost_offset = self.future_ask_prices[0] - our_bid_price
-            # future_bid_cost_offset = self.future_bid_prices[0] - our_ask_price
-            # future_total_cost = (future_ask_cost_offset + future_bid_cost_offset) * vol
-            # hedge_ask_fee = vol * self.future_ask_prices[0] * TAKER_FEE
-            # hedge_bid_fee = vol * self.future_bid_prices[0] * TAKER_FEE
-            # total_hedge_cost = future_total_cost + hedge_ask_fee + hedge_bid_fee
+                midpoint_std = np.std(self.past_midpoints[-10:-1])
+                print(midpoint_std)
+                new_bid_price = (self.moving_average - self.std_ratio * midpoint_std + TICK_SIZE_IN_CENTS) // TICK_SIZE_IN_CENTS * TICK_SIZE_IN_CENTS
+                new_ask_price = (self.moving_average + self.std_ratio * midpoint_std + TICK_SIZE_IN_CENTS) // TICK_SIZE_IN_CENTS * TICK_SIZE_IN_CENTS
+                if new_ask_price <= new_bid_price:
+                    return
 
+                if self.bid_id != 0 and new_bid_price not in (self.bid_price, 0):
+                    self.send_cancel_order(self.bid_id)
+                    self.bid_id = 0
+                if self.ask_id != 0 and new_ask_price not in (self.ask_price, 0):
+                    self.send_cancel_order(self.ask_id)
+                    self.ask_id = 0
 
-
-
-            if self.bids_active == 0 and self.asks_active == 0:
-                if self.bid_id == 0 and our_bid_price != 0 and self.position < POSITION_LIMIT:
+                if self.bid_id == 0 and new_bid_price != 0 and self.position < POSITION_LIMIT:
                     self.bid_id = next(self.order_ids)
-                    self.bid_price = our_bid_price
-                    self.send_insert_order(self.bid_id, Side.BUY, our_bid_price, vol, Lifespan.GOOD_FOR_DAY)
+                    self.bid_price = new_bid_price
+                    print(new_bid_price)
+                    self.send_insert_order(self.bid_id, Side.BUY, int(new_bid_price), LOT_SIZE, Lifespan.GOOD_FOR_DAY)
                     self.bids.add(self.bid_id)
-                    self.bids_active += vol
 
-                if self.ask_id == 0 and our_ask_price != 0 and self.position > -POSITION_LIMIT:
+                if self.ask_id == 0 and new_ask_price != 0 and self.position > -POSITION_LIMIT:
                     self.ask_id = next(self.order_ids)
-                    self.ask_price = our_ask_price
-                    self.send_insert_order(self.ask_id, Side.SELL, our_ask_price, vol, Lifespan.GOOD_FOR_DAY)
+                    self.ask_price = new_ask_price
+                    print(new_ask_price)
+                    self.send_insert_order(self.ask_id, Side.SELL, int(new_ask_price), LOT_SIZE, Lifespan.GOOD_FOR_DAY)
                     self.asks.add(self.ask_id)
-                    self.asks_active += vol
-
-            if self.bids_active == 0 and self.asks_active > 0:
-                self.send_cancel_order(self.ask_id)
-                self.ask_id = 0
-                self.asks_active = 0
-            if self.asks_active == 0 and self.bids_active > 0:
-                self.send_cancel_order(self.bid_id)
-                self.bid_id = 0
-                self.bids_active = 0
 
     def on_order_filled_message(self, client_order_id: int, price: int, volume: int) -> None:
         """Called when one of your orders is filled, partially or fully.
@@ -161,11 +155,9 @@ class AutoTrader(BaseAutoTrader):
         self.logger.info("received order filled for order %d with price %d and volume %d", client_order_id,
                          price, volume)
         if client_order_id in self.bids:
-            self.bids_active -= volume
             self.position += volume
             self.send_hedge_order(next(self.order_ids), Side.ASK, MIN_BID_NEAREST_TICK, volume)
         elif client_order_id in self.asks:
-            self.asks_active -= volume
             self.position -= volume
             self.send_hedge_order(next(self.order_ids), Side.BID, MAX_ASK_NEAREST_TICK, volume)
 
