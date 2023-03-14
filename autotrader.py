@@ -17,19 +17,28 @@
 #     <https://www.gnu.org/licenses/>.
 import asyncio
 import itertools
-import math
-
 from typing import List
 
 from ready_trader_go import BaseAutoTrader, Instrument, Lifespan, MAXIMUM_ASK, MINIMUM_BID, Side
 
-LOT_SIZE = 25
 POSITION_LIMIT = 100
 TICK_SIZE_IN_CENTS = 100
 MIN_BID_NEAREST_TICK = (MINIMUM_BID + TICK_SIZE_IN_CENTS) // TICK_SIZE_IN_CENTS * TICK_SIZE_IN_CENTS
 MAX_ASK_NEAREST_TICK = MAXIMUM_ASK // TICK_SIZE_IN_CENTS * TICK_SIZE_IN_CENTS
 
+# TODO: hyper parameter tuning
+LOT_SIZE = 25
 DS = 0.03
+RATIO = 0.6
+
+
+def lte(a: int, b: int) -> bool:
+    return a <= b
+
+
+def gte(a: int, b: int) -> bool:
+    return a >= b
+
 
 class AutoTrader(BaseAutoTrader):
     """Example Auto-trader.
@@ -48,16 +57,10 @@ class AutoTrader(BaseAutoTrader):
         self.bids = {}
         self.asks = {}
         self.ask_id = self.ask_price = self.bid_id = self.bid_price = self.position = 0
-        
 
         self.etf_ask_prices = self.etf_ask_volumes = self.etf_bid_prices = self.etf_bid_volumes = self.future_ask_prices \
             = self.future_ask_volumes = self.future_bid_prices = self.future_bid_volumes = (0, 0, 0, 0, 0)
-            
-        self.last_etf_ask_price = 0
-        self.last_etf_bid_price = 0
-        self.last_future_ask_price = 0
-        self.last_future_bid_price = 0
-        
+
         self.t = 0
         self.spread = 8
 
@@ -92,39 +95,19 @@ class AutoTrader(BaseAutoTrader):
         """
 
         self.t += 1
-        
+
         self.logger.info("received order book for instrument %d with sequence number %d", instrument, sequence_number)
 
         self.cache_prices(instrument, sequence_number, ask_prices, ask_volumes, bid_prices, bid_volumes)
 
         if self.etf_ask_prices[0] > 0 and self.etf_bid_prices[0] > 0:
-            for order in self.bids:
-                if self.bids[order][0] <= self.t:
-                    self.send_cancel_order(order)
-                    # print("expired")
-                    self.spread -= DS
-                    continue
-                bid_price = self.bids[order][2]
-                multiplier = 1.0002 if bid_price >= self.etf_ask_prices[0] else 0.9999
-                if bid_price * multiplier >= self.future_bid_prices[0]:
-                    # print("unprofitable")
-                    self.send_cancel_order(order)
-                    self.spread -= DS
-                
-            for order in self.asks:
-                if self.asks[order][0] <= self.t:
-                    # print("expired")
-                    self.send_cancel_order(order)
-                    self.spread -= DS
-                    continue
-                ask_price = self.asks[order][2]
-                multiplier = 0.9998 if ask_price <= self.etf_bid_prices[0] else 1.0001
-                if ask_price * multiplier <= self.future_ask_prices[0]:
-                    # print("unprofitable")
-                    self.send_cancel_order(order)
-                    self.spread -= DS
-                    
+
+            self.remove_invalid_orders(self.bids, self.etf_ask_prices[0], self.future_bid_prices[0], False)
+            self.remove_invalid_orders(self.asks, self.etf_bid_prices[0], self.future_ask_prices[0], True)
+
             self.spread = max(1, self.spread)
+            spread = round(self.spread) # shouldn't this be self.spread?
+            print(self.spread)
 
             current_bid_price = self.future_ask_prices[0] + TICK_SIZE_IN_CENTS
             while True:
@@ -140,11 +123,6 @@ class AutoTrader(BaseAutoTrader):
                     break
                 current_ask_price += TICK_SIZE_IN_CENTS
 
-
-            # spread = round((self.etf_ask_prices[0] - self.etf_bid_prices[0]) / TICK_SIZE_IN_CENTS)
-            print(self.spread)
-            spread = round(self.spread)
-            # spread = 3
             c = 0
             while current_ask_price - current_bid_price < spread * TICK_SIZE_IN_CENTS:
                 if c % 2 == 0:
@@ -153,11 +131,6 @@ class AutoTrader(BaseAutoTrader):
                     current_ask_price += TICK_SIZE_IN_CENTS
                 c += 1
 
-            if current_bid_price > current_ask_price:
-                self.logger.warning("unexpected: calculated current_bid_price > current_ask_price")
-                return
-            
-            
             if len(self.bids) * LOT_SIZE + self.position + LOT_SIZE <= POSITION_LIMIT:
                 self.bid_id = next(self.order_ids)
                 self.send_insert_order(self.bid_id, Side.BUY, current_bid_price, LOT_SIZE, Lifespan.GOOD_FOR_DAY)
@@ -167,6 +140,23 @@ class AutoTrader(BaseAutoTrader):
                 self.ask_id = next(self.order_ids)
                 self.send_insert_order(self.ask_id, Side.SELL, current_ask_price, LOT_SIZE, Lifespan.GOOD_FOR_DAY)
                 self.asks[self.ask_id] = (self.t + 10, self.spread, current_ask_price)
+
+    def remove_invalid_orders(self, order_set, best_etf_cross_price, best_future_order_price, reverse_equality_for_profitability) -> None:
+        comparison = lte if reverse_equality_for_profitability else gte
+        for order in order_set:
+            # check if expired
+            if order_set[order][0] <= self.t:
+                self.send_cancel_order(order)
+                self.spread -= DS
+                continue
+
+            bid_price = order_set[order][2]
+            multiplier = 1.0002 if comparison(bid_price, best_etf_cross_price) else 0.9999
+
+            # check if no longer profitable
+            if comparison(bid_price * multiplier, best_future_order_price):
+                self.send_cancel_order(order)
+                self.spread -= DS
 
     def cache_prices(self, instrument: int, sequence_number: int, ask_prices: List[int], ask_volumes: List[int],
                      bid_prices: List[int], bid_volumes: List[int]) -> None:
@@ -198,13 +188,11 @@ class AutoTrader(BaseAutoTrader):
         if client_order_id in self.bids:
             self.position += volume
             self.send_hedge_order(next(self.order_ids), Side.ASK, MIN_BID_NEAREST_TICK, volume)
-            # print("filled")
-            self.spread += DS * volume * 0.6
+            self.spread += volume * DS * RATIO
         elif client_order_id in self.asks:
-            # print("filled")
             self.position -= volume
             self.send_hedge_order(next(self.order_ids), Side.BID, MAX_ASK_NEAREST_TICK, volume)
-            self.spread += DS * volume * 0.6
+            self.spread += volume * DS * RATIO
 
     def on_order_status_message(self, client_order_id: int, fill_volume: int, remaining_volume: int, fees: int) -> None:
         """Called when the status of one of your orders changes.
@@ -233,16 +221,4 @@ class AutoTrader(BaseAutoTrader):
         If there are less than five prices on a side, then zeros will appear at
         the end of both the prices and volumes arrays.
         """
-        
-        if instrument == Instrument.ETF:
-            if ask_prices[0] != 0:
-                self.last_etf_ask_price = ask_prices[0]
-            if bid_prices[0] != 0:
-                self.last_etf_bid_price = bid_prices[0]
-        else:
-            if ask_prices[0] != 0:
-                self.last_future_ask_price = ask_prices[0]
-            if bid_prices[0] != 0:
-                self.last_future_bid_price = bid_prices[0]
-
         self.logger.info("received trade ticks for instrument %d with sequence number %d", instrument, sequence_number)
