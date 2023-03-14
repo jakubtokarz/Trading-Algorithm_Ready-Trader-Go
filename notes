@@ -2,3 +2,16 @@
     - provides liquidity (bid below asks, / ask above bids)
     - is a lower/higher bid/ask than the "true" future price (since if we then hedge for that future price that means we made free 
       money)
+    
+todo:
+- like autotrader7: most competitive offer + spread
+- except: find only offer which will get executed
+- so: trying to find ask price, start with self.etf_bid_prices[0] + TICK_SIZE and move up until a profitable price is found 
+  or until you're at (or maybe above?) self.etf_ask_prices[0] (so now you're competing with people again)
+    - maybe go a couple steps further depending on volatility or some shit, or hard-coded "spread" analogue
+- WAIT, or is it: at each time step, go for the most profitable trade which will get executed immediately? so move from 
+  more profitable to least 
+
+IDEA:
+- go over exisiting orders, cancel if a /more profitable/ one can be made
+- estimate spread using future dy/dx: if future price is changing fast, we can be greedy

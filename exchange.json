@@ -42,6 +42,11 @@
     "first_working": "first_working",
     "first_working_bigger_lot_size": "first_working_bigger_lot_size",
     "initial_trader": "initial_trader",
-    "up_the_market": "up_the_market"
+    "up_the_market": "up_the_market",
+    "TraderSeven": "secret7",
+    "moving_avg": "moving_avg",
+    "TraderEight": "secret8",
+    "TraderSixNine": "secret69",
+    "TraderNine": "secret9"
   }
 }

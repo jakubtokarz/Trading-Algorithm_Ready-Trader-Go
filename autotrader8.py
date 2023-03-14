@@ -17,31 +17,18 @@
 #     <https://www.gnu.org/licenses/>.
 import asyncio
 import itertools
-import math
-import numpy as np
 
 from typing import List
 
 from ready_trader_go import BaseAutoTrader, Instrument, Lifespan, MAXIMUM_ASK, MINIMUM_BID, Side
 
-STDEV_WINDOW_SIZE = 5
-
-ORDER_LIMIT = 10
 LOT_SIZE = 25
 POSITION_LIMIT = 100
 TICK_SIZE_IN_CENTS = 100
 MIN_BID_NEAREST_TICK = (MINIMUM_BID + TICK_SIZE_IN_CENTS) // TICK_SIZE_IN_CENTS * TICK_SIZE_IN_CENTS
 MAX_ASK_NEAREST_TICK = MAXIMUM_ASK // TICK_SIZE_IN_CENTS * TICK_SIZE_IN_CENTS
 
-
-def find_competitive(future_ask_prices: int, etf_bid_prices: int, etf_ask_prices: int, future_bid_prices: int) -> int:
-    current = future_ask_prices
-    while current >= etf_bid_prices:
-        multiplier = 0.98 if current >= etf_ask_prices else 1.01
-        if current * multiplier < future_bid_prices:
-            return current
-        current -= TICK_SIZE_IN_CENTS
-
+DS = 0.03
 
 class AutoTrader(BaseAutoTrader):
     """Example Auto-trader.
@@ -57,20 +44,22 @@ class AutoTrader(BaseAutoTrader):
         """Initialise a new instance of the AutoTrader class."""
         super().__init__(loop, team_name, secret)
         self.order_ids = itertools.count(1)
-        self.bids = set()
-        self.asks = set()
+        self.bids = {}
+        self.asks = {}
         self.ask_id = self.ask_price = self.bid_id = self.bid_price = self.position = 0
+        
 
         self.etf_ask_prices = self.etf_ask_volumes = self.etf_bid_prices = self.etf_bid_volumes = self.future_ask_prices \
             = self.future_ask_volumes = self.future_bid_prices = self.future_bid_volumes = (0, 0, 0, 0, 0)
-
-        self.order_count = 0
-
-        self.past_prices = []
-        self.past_volumes = []
+            
+        self.last_etf_ask_price = 0
+        self.last_etf_bid_price = 0
+        self.last_future_ask_price = 0
+        self.last_future_bid_price = 0
         
-        self.stdev_cnt = 0
-        self.stdev_sum = 0
+        self.t = 0
+        self.lifespan = 12
+        self.spread = 8
 
     def on_error_message(self, client_order_id: int, error_message: bytes) -> None:
         """Called when the exchange detects an error.
@@ -101,70 +90,55 @@ class AutoTrader(BaseAutoTrader):
         prices are reported along with the volume available at each of those
         price levels.
         """
+
+        self.t += 1
+        
         self.logger.info("received order book for instrument %d with sequence number %d", instrument, sequence_number)
 
         self.cache_prices(instrument, sequence_number, ask_prices, ask_volumes, bid_prices, bid_volumes)
 
-        self.past_prices.append(ask_prices)
-        self.past_prices.append(bid_prices)
-        self.past_volumes.append(ask_volumes)
-        self.past_volumes.append(bid_volumes)
-        while len(self.past_prices) > STDEV_WINDOW_SIZE:
-            self.past_prices.pop(0)
-        while len(self.past_volumes) > STDEV_WINDOW_SIZE:
-            self.past_volumes.pop(0)
-
         if self.etf_ask_prices[0] > 0 and self.etf_bid_prices[0] > 0:
 
             for order in self.bids:
-                self.send_cancel_order(order)
+                if self.bids[order][0] <= self.t:
+                    self.send_cancel_order(order)
+                    self.spread -= DS
+                    continue
+                bid_price = self.bids[order][2]
+                multiplier = 1.0002 if bid_price >= self.etf_ask_prices[0] else 0.9999
+                if bid_price * multiplier >= self.future_bid_prices[0]:
+                    self.send_cancel_order(order)
+                
             for order in self.asks:
-                self.send_cancel_order(order)
+                if self.asks[order][0] <= self.t:
+                    self.send_cancel_order(order)
+                    self.spread -= DS
+                    continue
+                ask_price = self.asks[order][2]
+                multiplier = 0.9998 if ask_price <= self.etf_bid_prices[0] else 1.0001
+                if ask_price * multiplier <= self.future_ask_prices[0]:
+                    self.send_cancel_order(order)
+                    self.spread -= DS
+                    
+            self.lifespan = max(2, self.lifespan)
+            self.spread = max(1, self.spread)
 
-            # choose most competitive bid price at which we make a profit
-            current_bid_price = self.future_ask_prices[0]
-            while current_bid_price >= self.etf_bid_prices[0]:
-                multiplier = 0.98 if current_bid_price >= self.etf_ask_prices[0] else 1.01
+            current_bid_price = self.future_ask_prices[0] + TICK_SIZE_IN_CENTS
+            while True:
+                multiplier = 1.0002 if current_bid_price >= self.etf_ask_prices[0] else 0.9999
                 if current_bid_price * multiplier < self.future_bid_prices[0]:
                     break
                 current_bid_price -= TICK_SIZE_IN_CENTS
 
-            # choose most competitive ask price at which we make a profit
-            current_ask_price = self.future_bid_prices[0]
-            while current_ask_price <= self.etf_ask_prices[0]:
-                multiplier = 0.98 if current_ask_price <= self.etf_bid_prices[0] else 1.01
+            current_ask_price = self.future_bid_prices[0] - TICK_SIZE_IN_CENTS
+            while True:
+                multiplier = 0.9998 if current_ask_price <= self.etf_bid_prices[0] else 1.0001
                 if current_ask_price * multiplier > self.future_ask_prices[0]:
                     break
                 current_ask_price += TICK_SIZE_IN_CENTS
 
-            c = 0
-            while current_bid_price > current_ask_price:
-                if c % 2 == 0:
-                    current_bid_price -= TICK_SIZE_IN_CENTS
-                else:
-                    current_ask_price += TICK_SIZE_IN_CENTS
-                c += 1
-
-            spread = 8
-            if len(self.past_prices) > STDEV_WINDOW_SIZE:
-                average = np.average(self.past_prices, weights=self.past_volumes)
-                variance = np.average((self.past_prices-average)**2, weights=self.past_volumes)
-                stdev = math.sqrt(variance)
-                
-                self.stdev_cnt += 1
-                self.stdev_sum += stdev
-                
-                avg_stdev = self.stdev_sum / self.stdev_cnt
-                
-                x = average * (stdev - avg_stdev) * math.sqrt(STDEV_WINDOW_SIZE)
-                A = 0.0000002
-                B = 8
-                # print("x is", x)
-                spread = round(B + A*x)
-                if spread < 2:
-                    spread = 2
-
-            # print("chose spread", spread)
+            print(self.spread)
+            spread = round(self.spread)
             c = 0
             while current_ask_price - current_bid_price < spread * TICK_SIZE_IN_CENTS:
                 if c % 2 == 0:
@@ -172,16 +146,20 @@ class AutoTrader(BaseAutoTrader):
                 else:
                     current_ask_price += TICK_SIZE_IN_CENTS
                 c += 1
-
+            
+            if current_bid_price > current_ask_price:
+                self.logger.warning("unexpected: calculated current_bid_price > current_ask_price")
+                return
+            
             if len(self.bids) * LOT_SIZE + self.position + LOT_SIZE <= POSITION_LIMIT:
                 self.bid_id = next(self.order_ids)
                 self.send_insert_order(self.bid_id, Side.BUY, current_bid_price, LOT_SIZE, Lifespan.GOOD_FOR_DAY)
-                self.bids.add(self.bid_id)
+                self.bids[self.bid_id] = (self.t + 10, self.spread, current_bid_price)
 
             if -len(self.asks) * LOT_SIZE + self.position - LOT_SIZE >= -POSITION_LIMIT:
                 self.ask_id = next(self.order_ids)
                 self.send_insert_order(self.ask_id, Side.SELL, current_ask_price, LOT_SIZE, Lifespan.GOOD_FOR_DAY)
-                self.asks.add(self.ask_id)
+                self.asks[self.ask_id] = (self.t + 10, self.spread, current_ask_price)
 
     def cache_prices(self, instrument: int, sequence_number: int, ask_prices: List[int], ask_volumes: List[int],
                      bid_prices: List[int], bid_volumes: List[int]) -> None:
@@ -213,9 +191,13 @@ class AutoTrader(BaseAutoTrader):
         if client_order_id in self.bids:
             self.position += volume
             self.send_hedge_order(next(self.order_ids), Side.ASK, MIN_BID_NEAREST_TICK, volume)
+            # print("filled")
+            self.spread += DS * volume * 0.6
         elif client_order_id in self.asks:
+            # print("filled")
             self.position -= volume
             self.send_hedge_order(next(self.order_ids), Side.BID, MAX_ASK_NEAREST_TICK, volume)
+            self.spread += DS * volume * 0.6
 
     def on_order_status_message(self, client_order_id: int, fill_volume: int, remaining_volume: int, fees: int) -> None:
         """Called when the status of one of your orders changes.
@@ -230,16 +212,14 @@ class AutoTrader(BaseAutoTrader):
         self.logger.info("received order status for order %d with fill volume %d remaining %d and fees %d",
                          client_order_id, fill_volume, remaining_volume, fees)
         if remaining_volume == 0:
-            if client_order_id == self.bid_id:
-                self.bid_id = 0
-            elif client_order_id == self.ask_id:
-                self.ask_id = 0
+            # if client_order_id == self.bid_id:
+            #     self.bid_id = 0
+            # elif client_order_id == self.ask_id:
+            #     self.ask_id = 0
 
             # It could be either a bid or an ask
-            self.bids.discard(client_order_id)
-            self.asks.discard(client_order_id)
-
-            self.order_count -= 1
+            self.bids.pop(client_order_id, 0)
+            self.asks.pop(client_order_id, 0)
 
     def on_trade_ticks_message(self, instrument: int, sequence_number: int, ask_prices: List[int], ask_volumes: List[int],
                                bid_prices: List[int], bid_volumes: List[int]) -> None:
@@ -252,4 +232,17 @@ class AutoTrader(BaseAutoTrader):
         If there are less than five prices on a side, then zeros will appear at
         the end of both the prices and volumes arrays.
         """
+        
+        if instrument == Instrument.ETF:
+            if ask_prices[0] != 0:
+                self.last_etf_ask_price = ask_prices[0]
+            if bid_prices[0] != 0:
+                self.last_etf_bid_price = bid_prices[0]
+        else:
+            if ask_prices[0] != 0:
+                self.last_future_ask_price = ask_prices[0]
+            if bid_prices[0] != 0:
+                self.last_future_bid_price = bid_prices[0]
+
+        
         self.logger.info("received trade ticks for instrument %d with sequence number %d", instrument, sequence_number)
