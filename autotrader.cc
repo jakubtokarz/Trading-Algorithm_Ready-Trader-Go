@@ -96,35 +96,6 @@ void AutoTrader::OrderBookMessageHandler(Instrument instrument,
 
     if (mEtfAskPrices.size() == 0 || mFutureAskPrices.size() == 0)
         return;
-
-    for (auto id : mBids) {
-        if (mBidTimes[id] <= mTime) {
-            SendCancelOrder(id);
-            mSpread -= DS;
-        } else {
-            unsigned long bidPrice = mBidPrices[id];
-            float mult = bidPrice >= mEtfAskPrices.at(0) ? 1.0002f : 0.9999f;
-            if (static_cast<float>(bidPrice) * mult >= static_cast<float>(mFutureBidPrices.at(0))) {
-                SendCancelOrder(id);
-                mSpread -= DS;
-            }
-        }
-    }
-    for (auto id : mAsks) {
-        if (mAskTimes[id] <= mTime) {
-            SendCancelOrder(id);
-            mSpread -= DS;
-        } else {
-            unsigned long askPrice = mAskPrices[id];
-            float mult = askPrice <= mEtfBidPrices.at(0) ? 0.9998f : 1.0001f;
-            if (static_cast<float>(askPrice) * mult <= static_cast<float>(mFutureAskPrices.at(0)))
-                SendCancelOrder(id);
-                mSpread -= DS;
-        }
-    }
-    
-    if (mSpread < 1.0f)
-        mSpread = 1.0f;
     
     unsigned long currentBidPrice = mFutureAskPrices.at(0) + TICK_SIZE_IN_CENTS;
     while (true)
@@ -160,15 +131,6 @@ void AutoTrader::OrderBookMessageHandler(Instrument instrument,
     if (currentBidPrice > currentAskPrice)
         return;
 
-    /* std::cout << "asks: \n"; */
-    /* for (auto id : mAsks) */
-    /*     std::cout << id << " "; */
-    /* std::cout << "\nbids:\n"; */
-    /* for (auto id : mBids) */
-    /*     std::cout << id << " "; */
-    /* std::cout << "\n"; */
-
-    /* std::cout << currentBidPrice << " " << currentAskPrice << "\n\n"; */
     constexpr int lifetime = 10;
     if (static_cast<signed long>(mBids.size() * LOT_SIZE) + mPosition + LOT_SIZE <= static_cast<signed long>(POSITION_LIMIT))
     {
@@ -186,6 +148,35 @@ void AutoTrader::OrderBookMessageHandler(Instrument instrument,
         mAskTimes[id] = mTime + lifetime;
         mAskPrices[id] = currentAskPrice;
     }
+
+    for (auto id : mBids) {
+        if (mBidTimes[id] <= mTime) {
+            SendCancelOrder(id);
+            mSpread -= DS;
+        } else {
+            unsigned long bidPrice = mBidPrices[id];
+            float mult = bidPrice >= mEtfAskPrices.at(0) ? 1.0002f : 0.9999f;
+            if (static_cast<float>(bidPrice) * mult >= static_cast<float>(mFutureBidPrices.at(0))) {
+                SendCancelOrder(id);
+                mSpread -= DS;
+            }
+        }
+    }
+    for (auto id : mAsks) {
+        if (mAskTimes[id] <= mTime) {
+            SendCancelOrder(id);
+            mSpread -= DS;
+        } else {
+            unsigned long askPrice = mAskPrices[id];
+            float mult = askPrice <= mEtfBidPrices.at(0) ? 0.9998f : 1.0001f;
+            if (static_cast<float>(askPrice) * mult <= static_cast<float>(mFutureAskPrices.at(0)))
+                SendCancelOrder(id);
+                mSpread -= DS;
+        }
+    }
+    
+    if (mSpread < 1.0f)
+        mSpread = 1.0f;
 }
 
 void AutoTrader::OrderFilledMessageHandler(unsigned long clientOrderId,
