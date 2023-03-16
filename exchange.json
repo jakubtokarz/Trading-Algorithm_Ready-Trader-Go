@@ -36,17 +36,7 @@
     "PositionLimit": 100
   },
   "Traders": {
-    "TraderOne": "secret1",
-    "estimate_before_attempting": "estimate_before_attempting",
-    "fill_spread": "fill_spread",
-    "first_working": "first_working",
-    "first_working_bigger_lot_size": "first_working_bigger_lot_size",
-    "initial_trader": "initial_trader",
-    "up_the_market": "up_the_market",
-    "TraderSeven": "secret7",
-    "moving_avg": "moving_avg",
-    "TraderEight": "secret8",
-    "TraderSixNine": "secret69",
-    "TraderNine": "secret9"
+    "TraderOne": "secret",
+    "TraderTwo": "secret"
   }
 }
