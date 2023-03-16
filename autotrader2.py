@@ -72,6 +72,10 @@ class AutoTrader(BaseAutoTrader):
         self.lifespan = 12
         self.spread = 8
 
+        self.future_position = 0
+
+        self.hedge_freq = 300
+
     def on_error_message(self, client_order_id: int, error_message: bytes) -> None:
         """Called when the exchange detects an error.
 
@@ -191,6 +195,16 @@ class AutoTrader(BaseAutoTrader):
                 self.send_insert_order(self.ask_id, Side.SELL, current_ask_price, LOT_SIZE, Lifespan.GOOD_FOR_DAY)
                 self.asks[self.ask_id] = (self.t + 10, self.spread, current_ask_price)
 
+            # Change hedge_freq to change how frequent hedge orders are made
+            if self.t % self.hedge_freq == 0:
+                fut_vol = -self.position - self.future_position
+                if fut_vol < -10:
+                    self.send_hedge_order(next(self.order_ids), Side.ASK, MIN_BID_NEAREST_TICK, -fut_vol)
+                if fut_vol > 10:
+                    self.send_hedge_order(next(self.order_ids), Side.BUY, MAX_ASK_NEAREST_TICK, fut_vol)
+                self.future_position += fut_vol
+
+
     def cache_prices(self, instrument: int, sequence_number: int, ask_prices: List[int], ask_volumes: List[int],
                      bid_prices: List[int], bid_volumes: List[int]) -> None:
         """
@@ -220,14 +234,14 @@ class AutoTrader(BaseAutoTrader):
 
         if client_order_id in self.bids:
             self.position += volume
-            self.send_hedge_order(next(self.order_ids), Side.ASK, MIN_BID_NEAREST_TICK, volume)
+            # self.send_hedge_order(next(self.order_ids), Side.ASK, MIN_BID_NEAREST_TICK, volume)
             # print("filled")
             self.lifespan += DL * volume * 0.6
             self.spread += DS * volume * 0.6
         elif client_order_id in self.asks:
             # print("filled")
             self.position -= volume
-            self.send_hedge_order(next(self.order_ids), Side.BID, MAX_ASK_NEAREST_TICK, volume)
+            # self.send_hedge_order(next(self.order_ids), Side.BID, MAX_ASK_NEAREST_TICK, volume)
             self.lifespan += DL * volume  * 0.6
             self.spread += DS * volume * 0.6
 
