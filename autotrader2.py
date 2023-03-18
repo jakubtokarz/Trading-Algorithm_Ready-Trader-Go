@@ -82,6 +82,7 @@ class AutoTrader(BaseAutoTrader):
         self.hedge_freq = 300
 
         self.time_unhedged = time.time()
+        self.hedge_time = 10
         self.speed = 10
 
     def on_error_message(self, client_order_id: int, error_message: bytes) -> None:
@@ -192,10 +193,10 @@ class AutoTrader(BaseAutoTrader):
             if diff < spread_in_cents:
                 change = ((spread_in_cents - diff) // (2 * TICK_SIZE_IN_CENTS)) * TICK_SIZE_IN_CENTS
 
-                current_bid_price -= change
-                current_ask_price += change
-                if (diff % 2 == 0) ^ (spread_in_cents % 2 == 0):
-                    current_bid_price -= TICK_SIZE_IN_CENTS
+                current_bid_price -= TICK_SIZE_IN_CENTS
+                current_ask_price += TICK_SIZE_IN_CENTS
+                # if (diff % 2 == 0) ^ (spread_in_cents % 2 == 0):
+                #     current_bid_price -= TICK_SIZE_IN_CENTS
 
             if len(self.bids) * LOT_SIZE + self.position + LOT_SIZE <= POSITION_LIMIT:
                 self.bid_id = next(self.order_ids)
@@ -208,7 +209,7 @@ class AutoTrader(BaseAutoTrader):
                 self.asks[self.ask_id] = (self.t + 10, self.spread, current_ask_price)
 
             # Change hedge_freq to change how frequent hedge orders are made
-            if time.time() - self.time_unhedged > 55/self.speed:
+            if time.time() - self.time_unhedged > self.hedge_time/self.speed:
                 self.time_unhedged = time.time()
                 self.logger.info("position: %d", self.position)
                 self.logger.info("position future: %d", self.future_position)
