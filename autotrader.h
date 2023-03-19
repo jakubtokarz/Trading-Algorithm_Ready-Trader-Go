@@ -23,6 +23,7 @@
 #include <string>
 #include <unordered_set>
 #include <unordered_map>
+#include <chrono>
 
 #include <boost/asio/io_context.hpp>
 
@@ -97,8 +98,11 @@ public:
 private:
     unsigned long mNextMessageId = 1;
     signed long mPosition = 0;
+    signed long mFuturePosition = 0;
     std::unordered_set<unsigned long> mAsks;
     std::unordered_set<unsigned long> mBids;
+    std::unordered_set<unsigned long> mFutureAsks;
+    std::unordered_set<unsigned long> mFutureBids;
     
     std::array<unsigned long, ReadyTraderGo::TOP_LEVEL_COUNT> mEtfAskPrices;
     std::array<unsigned long, ReadyTraderGo::TOP_LEVEL_COUNT> mEtfBidPrices;
@@ -109,7 +113,8 @@ private:
     std::unordered_map<unsigned long, unsigned long> mBidPrices;
     std::unordered_map<unsigned long, unsigned long> mAskPrices;
     int mTime = 0;
-    float mSpread;
+    long long mHedgeTime = 10000; // in ms
+    std::chrono::steady_clock::time_point mTimeUnhedged = std::chrono::steady_clock::now();
 };
 
 #endif //CPPREADY_TRADER_GO_AUTOTRADER_H

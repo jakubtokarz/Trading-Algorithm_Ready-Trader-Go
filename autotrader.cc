@@ -18,6 +18,7 @@
 #include <array>
 #include <iostream>
 #include <cmath>
+#include <chrono>
 
 #include <boost/asio/io_context.hpp>
 
@@ -35,13 +36,10 @@ constexpr int TICK_SIZE_IN_CENTS = 100;
 constexpr int MIN_BID_NEARST_TICK = (MINIMUM_BID + TICK_SIZE_IN_CENTS) / TICK_SIZE_IN_CENTS * TICK_SIZE_IN_CENTS;
 constexpr int MAX_ASK_NEAREST_TICK = MAXIMUM_ASK / TICK_SIZE_IN_CENTS * TICK_SIZE_IN_CENTS;
 
-constexpr float DS = 0.04f;
-
 AutoTrader::AutoTrader(boost::asio::io_context &context) : BaseAutoTrader(context)
 {
     mBidTimes = {};
     mAskTimes = {};
-    mSpread = 8;
 }
 
 void AutoTrader::DisconnectHandler()
@@ -66,6 +64,14 @@ void AutoTrader::HedgeFilledMessageHandler(unsigned long clientOrderId,
 {
     RLOG(LG_AT, LogLevel::LL_INFO) << "hedge order " << clientOrderId << " filled for " << volume
                                    << " lots at $" << price << " average price in cents";
+
+    if (mFutureAsks.count(clientOrderId) == 1)
+        mFuturePosition -= volume;
+    else if (mFutureBids.count(clientOrderId) == 1)
+        mFuturePosition += volume;
+
+    if (std::abs(-mPosition - mFuturePosition) <= 10)
+        mTimeUnhedged = std::chrono::steady_clock::now();
 }
 
 void AutoTrader::OrderBookMessageHandler(Instrument instrument,
@@ -85,8 +91,7 @@ void AutoTrader::OrderBookMessageHandler(Instrument instrument,
     {
         std::copy(askPrices.begin(), askPrices.end(), mFutureAskPrices.begin());
         std::copy(bidPrices.begin(), bidPrices.end(), mFutureBidPrices.begin());
-    }
-    else if (instrument == Instrument::ETF)
+    } else
     {
         std::copy(askPrices.begin(), askPrices.end(), mEtfAskPrices.begin());
         std::copy(bidPrices.begin(), bidPrices.end(), mEtfBidPrices.begin());
@@ -115,68 +120,71 @@ void AutoTrader::OrderBookMessageHandler(Instrument instrument,
         currentAskPrice += static_cast<unsigned long>(TICK_SIZE_IN_CENTS);
     }
 
-    unsigned long spread = static_cast<unsigned long>(round(mSpread));
-    // std::cout << mSpread << " " << spread <<  "\n";
-    spread = 4;
-    int c = 0;
-    while (currentAskPrice - currentBidPrice < spread * TICK_SIZE_IN_CENTS)
-    {
-        if (c % 2 == 0)
+    // hard-coded spread of 1
+    if (currentAskPrice == currentBidPrice) {
+        if (rand()%2 == 0) {
             currentBidPrice -= static_cast<unsigned long>(TICK_SIZE_IN_CENTS);
-        else
+        } else {
             currentAskPrice += static_cast<unsigned long>(TICK_SIZE_IN_CENTS);
-        c++;
+        }
     }
     
-    if (currentBidPrice > currentAskPrice)
-        return;
+    /* if (currentBidPrice > currentAskPrice) */
+    /*     return; */
 
     constexpr int lifetime = 10;
     if (static_cast<signed long>(mBids.size() * LOT_SIZE) + mPosition + LOT_SIZE <= static_cast<signed long>(POSITION_LIMIT))
     {
-        unsigned long id = mNextMessageId++;
-        SendInsertOrder(id, Side::BUY, currentBidPrice, LOT_SIZE, Lifespan::GOOD_FOR_DAY);
-        mBids.emplace(id);
-        mBidTimes[id] = mTime + lifetime;
-        mBidPrices[id] = currentBidPrice;
+        SendInsertOrder(mNextMessageId, Side::BUY, currentBidPrice, LOT_SIZE, Lifespan::GOOD_FOR_DAY);
+        mBids.emplace(mNextMessageId);
+        mBidTimes[mNextMessageId] = mTime + lifetime;
+        mBidPrices[mNextMessageId++] = currentBidPrice;
     }
     if (-static_cast<signed long>(mAsks.size() * LOT_SIZE) + mPosition - LOT_SIZE >= -static_cast<signed long>(POSITION_LIMIT))
     {
-        unsigned long id = mNextMessageId++;
-        SendInsertOrder(id, Side::SELL, currentAskPrice, LOT_SIZE, Lifespan::GOOD_FOR_DAY);
-        mAsks.emplace(id);
-        mAskTimes[id] = mTime + lifetime;
-        mAskPrices[id] = currentAskPrice;
+        SendInsertOrder(mNextMessageId, Side::SELL, currentAskPrice, LOT_SIZE, Lifespan::GOOD_FOR_DAY);
+        mAsks.emplace(mNextMessageId);
+        mAskTimes[mNextMessageId] = mTime + lifetime;
+        mAskPrices[mNextMessageId++] = currentAskPrice;
     }
 
     for (auto id : mBids) {
         if (mBidTimes[id] <= mTime) {
             SendCancelOrder(id);
-            mSpread -= DS;
         } else {
             unsigned long bidPrice = mBidPrices[id];
             float mult = bidPrice >= mEtfAskPrices.at(0) ? 1.0002f : 0.9999f;
             if (static_cast<float>(bidPrice) * mult >= static_cast<float>(mFutureBidPrices.at(0))) {
                 SendCancelOrder(id);
-                mSpread -= DS;
             }
         }
     }
     for (auto id : mAsks) {
         if (mAskTimes[id] <= mTime) {
             SendCancelOrder(id);
-            mSpread -= DS;
         } else {
             unsigned long askPrice = mAskPrices[id];
             float mult = askPrice <= mEtfBidPrices.at(0) ? 0.9998f : 1.0001f;
             if (static_cast<float>(askPrice) * mult <= static_cast<float>(mFutureAskPrices.at(0)))
                 SendCancelOrder(id);
-                mSpread -= DS;
         }
     }
     
-    if (mSpread < 1.0f)
-        mSpread = 1.0f;
+    std::chrono::steady_clock::time_point current = std::chrono::steady_clock::now();
+    auto difference = std::chrono::duration_cast<std::chrono::milliseconds>(current - mTimeUnhedged).count();
+    // std::cout << "difference is " << difference << "\n";
+    // TODO: CHANGE THIS / 10
+    if (difference > mHedgeTime / 10) {
+        mTimeUnhedged = current;
+        int futureVolume = -mPosition - mFuturePosition;
+        if (futureVolume < 0) {
+            SendHedgeOrder(mNextMessageId, Side::SELL, MIN_BID_NEARST_TICK, -futureVolume);
+            mFutureAsks.emplace(mNextMessageId++);
+        } else if (futureVolume > 0) {
+            SendHedgeOrder(mNextMessageId, Side::BUY, MAX_ASK_NEAREST_TICK, futureVolume);
+            mFutureBids.emplace(mNextMessageId++);
+        }
+    }
 }
 
 void AutoTrader::OrderFilledMessageHandler(unsigned long clientOrderId,
@@ -186,17 +194,12 @@ void AutoTrader::OrderFilledMessageHandler(unsigned long clientOrderId,
     RLOG(LG_AT, LogLevel::LL_INFO) << "order " << clientOrderId << " filled for " << volume
                                    << " lots at $" << price << " cents";
     if (mAsks.count(clientOrderId) == 1)
-    {
-        SendHedgeOrder(mNextMessageId++, Side::BUY, MAX_ASK_NEAREST_TICK, volume);
         mPosition -= (long)volume;
-        mSpread += DS * static_cast<float>(volume) * 1.0;
-    }
     else if (mBids.count(clientOrderId) == 1)
-    {
-        SendHedgeOrder(mNextMessageId++, Side::SELL, MIN_BID_NEARST_TICK, volume);
         mPosition += (long)volume;
-        mSpread += DS * static_cast<float>(volume) * 1.0;
-    }
+
+    if (std::abs(-mPosition - mFuturePosition) <= 10)
+        mTimeUnhedged = std::chrono::steady_clock::now();
 }
 
 void AutoTrader::OrderStatusMessageHandler(unsigned long clientOrderId,
@@ -212,6 +215,8 @@ void AutoTrader::OrderStatusMessageHandler(unsigned long clientOrderId,
         mBidTimes.erase(clientOrderId);
         mAskPrices.erase(clientOrderId);
         mBidPrices.erase(clientOrderId);
+        mFutureAsks.erase(clientOrderId);
+        mFutureBids.erase(clientOrderId);
     }
 }
 
