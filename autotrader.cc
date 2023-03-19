@@ -35,6 +35,7 @@ constexpr int POSITION_LIMIT = 100;
 constexpr int TICK_SIZE_IN_CENTS = 100;
 constexpr int MIN_BID_NEARST_TICK = (MINIMUM_BID + TICK_SIZE_IN_CENTS) / TICK_SIZE_IN_CENTS * TICK_SIZE_IN_CENTS;
 constexpr int MAX_ASK_NEAREST_TICK = MAXIMUM_ASK / TICK_SIZE_IN_CENTS * TICK_SIZE_IN_CENTS;
+constexpr int HEDGE_DELAY = 8000;
 
 AutoTrader::AutoTrader(boost::asio::io_context &context) : BaseAutoTrader(context)
 {
@@ -45,13 +46,13 @@ AutoTrader::AutoTrader(boost::asio::io_context &context) : BaseAutoTrader(contex
 void AutoTrader::DisconnectHandler()
 {
     BaseAutoTrader::DisconnectHandler();
-    RLOG(LG_AT, LogLevel::LL_INFO) << "execution connection lost";
+    // RLOG(LG_AT, LogLevel::LL_INFO) << "execution connection lost";
 }
 
 void AutoTrader::ErrorMessageHandler(unsigned long clientOrderId,
                                      const std::string &errorMessage)
 {
-    RLOG(LG_AT, LogLevel::LL_INFO) << "error with order " << clientOrderId << ": " << errorMessage;
+    // RLOG(LG_AT, LogLevel::LL_INFO) << "error with order " << clientOrderId << ": " << errorMessage;
     if (clientOrderId != 0 && ((mAsks.count(clientOrderId) == 1) || (mBids.count(clientOrderId) == 1)))
     {
         OrderStatusMessageHandler(clientOrderId, 0, 0, 0);
@@ -62,8 +63,8 @@ void AutoTrader::HedgeFilledMessageHandler(unsigned long clientOrderId,
                                            unsigned long price,
                                            unsigned long volume)
 {
-    RLOG(LG_AT, LogLevel::LL_INFO) << "hedge order " << clientOrderId << " filled for " << volume
-                                   << " lots at $" << price << " average price in cents";
+    // RLOG(LG_AT, LogLevel::LL_INFO) << "hedge order " << clientOrderId << " filled for " << volume
+    //                               << " lots at $" << price << " average price in cents";
 
     if (mFutureAsks.count(clientOrderId) == 1)
         mFuturePosition -= volume;
@@ -81,11 +82,11 @@ void AutoTrader::OrderBookMessageHandler(Instrument instrument,
                                          const std::array<unsigned long, TOP_LEVEL_COUNT> &bidPrices,
                                          const std::array<unsigned long, TOP_LEVEL_COUNT> &bidVolumes)
 {
-    RLOG(LG_AT, LogLevel::LL_INFO) << "order book received for " << instrument << " instrument"
-                                   << ": ask prices: " << askPrices[0]
-                                   << "; ask volumes: " << askVolumes[0]
-                                   << "; bid prices: " << bidPrices[0]
-                                   << "; bid volumes: " << bidVolumes[0];
+    /* RLOG(LG_AT, LogLevel::LL_INFO) << "order book received for " << instrument << " instrument" */
+    /*                                << ": ask prices: " << askPrices[0] */
+    /*                                << "; ask volumes: " << askVolumes[0] */
+    /*                                << "; bid prices: " << bidPrices[0] */
+    /*                                << "; bid volumes: " << bidVolumes[0]; */
 
     if (instrument == Instrument::FUTURE)
     {
@@ -174,7 +175,7 @@ void AutoTrader::OrderBookMessageHandler(Instrument instrument,
     auto difference = std::chrono::duration_cast<std::chrono::milliseconds>(current - mTimeUnhedged).count();
     // std::cout << "difference is " << difference << "\n";
     // TODO: CHANGE THIS / 10
-    if (difference > mHedgeTime / 10) {
+    if (difference > HEDGE_DELAY) {
         mTimeUnhedged = current;
         int futureVolume = -mPosition - mFuturePosition;
         if (futureVolume < 0) {
@@ -191,8 +192,8 @@ void AutoTrader::OrderFilledMessageHandler(unsigned long clientOrderId,
                                            unsigned long price,
                                            unsigned long volume)
 {
-    RLOG(LG_AT, LogLevel::LL_INFO) << "order " << clientOrderId << " filled for " << volume
-                                   << " lots at $" << price << " cents";
+    /* RLOG(LG_AT, LogLevel::LL_INFO) << "order " << clientOrderId << " filled for " << volume */
+    /*                                << " lots at $" << price << " cents"; */
     if (mAsks.count(clientOrderId) == 1)
         mPosition -= (long)volume;
     else if (mBids.count(clientOrderId) == 1)
@@ -227,9 +228,9 @@ void AutoTrader::TradeTicksMessageHandler(Instrument instrument,
                                           const std::array<unsigned long, TOP_LEVEL_COUNT> &bidPrices,
                                           const std::array<unsigned long, TOP_LEVEL_COUNT> &bidVolumes)
 {
-    RLOG(LG_AT, LogLevel::LL_INFO) << "trade ticks received for " << instrument << " instrument"
-                                   << ": ask prices: " << askPrices[0]
-                                   << "; ask volumes: " << askVolumes[0]
-                                   << "; bid prices: " << bidPrices[0]
-                                   << "; bid volumes: " << bidVolumes[0];
+    /* RLOG(LG_AT, LogLevel::LL_INFO) << "trade ticks received for " << instrument << " instrument" */
+    /*                                << ": ask prices: " << askPrices[0] */
+    /*                                << "; ask volumes: " << askVolumes[0] */
+    /*                                << "; bid prices: " << bidPrices[0] */
+    /*                                << "; bid volumes: " << bidVolumes[0]; */
 }

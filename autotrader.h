@@ -113,7 +113,6 @@ private:
     std::unordered_map<unsigned long, unsigned long> mBidPrices;
     std::unordered_map<unsigned long, unsigned long> mAskPrices;
     int mTime = 0;
-    long long mHedgeTime = 10000; // in ms
     std::chrono::steady_clock::time_point mTimeUnhedged = std::chrono::steady_clock::now();
 };
 
