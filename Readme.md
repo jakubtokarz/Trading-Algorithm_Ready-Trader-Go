@@ -10,9 +10,9 @@ More information about the contest is available at [readytradergo.optiver.com](h
 
 ## Our strategy
 
-The algorithm we use for our trader is very simple but highly optmized. We act as market makers and try to constantly make small, profitable trades. We estimate the true price of the instrument we're trading by taking the average of prices it's traded at weighted by volume and then make a pair of bid and ask trades with a certain spread. We adjust this spread dynamically according to how are recent trades have been performing. Additionally, to minimize risk we deploy a (delayed) hedging strategy.
+The algorithm we use for our trader is very simple but highly optmized. We act as market makers and try to constantly make small, profitable trades. We estimate the true price of the instrument we're trading by taking the average of prices it's traded at weighted by volume and then make a bid or ask order, depending on whether the current price is below/above the true price. We set this spread dynamically according to how are recent trades have been performing. We keep multiple orders alive and cancel them if they've existed for a given number of ticks or if they've become unprofitable. Additionally, to minimize risk we deploy a (delayed) hedging strategy, making simultaenous trades in two instruments so as to keep our position close to neutral.
 
-To minimze latency, in the last days of the contest we rewrote our submission into C++, which gave an appreciable performance increase.
+We considered many other features and improvements such as adjusting spread based on recent market volatility but ultimately rejected them as they performed more poorly than our relatively simple approach. To minimze latency, in the last days of the contest we also rewrote our submission in C++, which gave an appreciable performance increase.
 
 ## Getting started
 
@@ -174,10 +174,6 @@ To aid testing, you can speed up the match by modifying the "Speed" setting
 in the "exchange.json" configuration file - for example, setting the speed
 to 2.0 will halve the time it takes to run a match. Note, however, that
 increasing the speed may change the results.
-
-When testing your autotrader, you should try it with different sample data
-files by modifying the "MarketDataFile" setting in the "exchange.json"
-file.
 
 ### Replaying a match
 
