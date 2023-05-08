@@ -1,33 +1,25 @@
-# Ready Trader Go
+# Ready Trader Go Submission - Team Budlahkee
 
-## IT'S READY TRADER GO TIME
+## About
 
-Welcome to the ultimate team student trading competition. Competitors get to
-learn all the fundamentals of trading and truly test their coding and analytical
-skills. The aim is to build and optimise a trading algorithm that outperforms
-all others on a virtual exchange.
+This repository contains the code for our team's submision in Optiver's 2023 Ready Trader Go contest: *a trading competition where students learn all the fundamentals of trading and truly test their coding and analytical skills. The aim is to build and optimise a trading algorithm that outperforms all others on a virtual exchange.*
 
-To learn more about the competition, visit [readytradergo.optiver.com]
-(https://readytradergo.optiver.com).
+Our submission placed us in the top 17-32 of teams out of 2800 accepted, placing us in the top ~1%, unfortunately just one match win away from a spot in the top 16 and on the leaderboard. Nevertheless we found participating immensely fun as we got to quickly iterate on a solution to an interesting technical problem. 
+
+More information about the contest is available at [readytradergo.optiver.com](https://readytradergo.optiver.com). 
+
+## Our strategy
+
+The algorithm we use for our trader is very simple but highly optmized. We act as market makers and try to constantly make small, profitable trades. We estimate the true price of the instrument we're trading by taking the average of prices it's traded at weighted by volume and then make a pair of bid and ask trades with a certain spread. We adjust this spread dynamically according to how are recent trades have been performing. Additionally, to minimize risk we deploy a (delayed) hedging strategy.
+
+To minimze latency, in the last days of the contest we rewrote our submission into C++, which gave an appreciable performance increase.
 
 ## Getting started
 
-To run Ready Trader Go, you'll need Python version 3.11 or above and PySide6.
-You can download Python from [www.python.org](https://www.python.org).
-
-Once you have installed Python, you'll need to create a Python virtual
-environment, and you can find instructions for creating and using virtual
-environments at
-[docs.python.org/3/library/venv.html](https://docs.python.org/3/library/venv.html).
-
-To use the Ready Trader Go graphical user interface, you'll need to install
-the [PySide6 package](https://pypi.org/project/PySide6/) which you can do by
-running
-
+To run Ready Trader Go, you'll need Python version 3.11 or above and PySide6. To install PySide6, run:
 ```shell
 pip3 install PySide6
 ```
-
 in your Python virtual environment.
 
 ### Running a Ready Trader Go match
@@ -208,34 +200,3 @@ Autotraders in Ready Trader Go will be run in the following environment:
 * Maximum number of autotraders per match: 8
 * Autotraders may not create sub-processes but may have multiple threads
 * Autotraders may not access the internet
-
-## How do I submit my AutoTrader?
-
-Shortly after the competition begins you'll be supplied with the details of
-a [GIT repository](https://git-scm.com) which you can use to submit your
-autotrader. To access the GIT repository, you'll first need to 'clone' it.
-
-For example:
-
-```shell
-git clone https://git-codecommit.eu-central-1.amazonaws.com/v1/repos/TEAM_NAME
-```
-
-(replace 'TEAM_NAME' with your team name.)
-
-To submit your autotrader, you need to _commit_ your `autotrader.py` file to the
-GIT repository and then _push_ that commit to your Git repository. For example:
-
-```shell
-git add autotrader.py
-git commit -m "Updating my autotrader"
-git push
-```
-
-Do _not_ put the `autotrader.py` file in a folder and do _not_ include any other
-files (any other files will be ignored). You may only submit one autotrader (i.e.
-you cannot submit both a Python and a C++ autotrader). 
-
-You may replace your autotrader with a new one at any time. When each
-tournament starts we'll use the autotrader in your GIT repository at the
-cut-off time for that tournament.
