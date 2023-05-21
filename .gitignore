@@ -1,8 +1,6 @@
 .idea/
 __pycache__/
-data/
 ready_trader_go/__pycache__
 match_events.csv
 *.log
-*.csv
 *.dat
